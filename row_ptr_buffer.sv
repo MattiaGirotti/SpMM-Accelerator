@@ -21,17 +21,11 @@ module row_ptr_buffer #(
     // --- Read Interface ---  
     input  logic [$clog2(TOTAL_PTRS-1)-1:0]    read_row_idx_i,      
     output logic [DATA_WIDTH-1:0]              rdata_start_o,       
-    output logic [DATA_WIDTH-1:0]              rdata_end_o,         
-
-    // --- Status Interface ---
-    output logic                               full_o               // High when all words have been written
+    output logic [DATA_WIDTH-1:0]              rdata_end_o         
 );
 
     // Linear/block-structured SCM memory array  
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;
-
-    // Tracking written words to detect full status
-    logic [NUM_WORDS-1:0] valid_mask_q;
 
     // Translation of row index to coordinates for the first element (row_ptr[i])  
     logic [$clog2(NUM_WORDS)-1:0]      r1_word_idx;
@@ -55,22 +49,6 @@ module row_ptr_buffer #(
 
     assign rdata_start_comb = mem_q[r1_word_idx][r1_elem_idx];
     assign rdata_end_comb   = mem_q[r2_word_idx][r2_elem_idx];
-
-    // Status output logic
-    assign full_o = &valid_mask_q;
-
-    // -------------------------------------------------------------------------
-    // WRITE SIDE & VALID TRACKING (MEM-SCM)  
-    // -------------------------------------------------------------------------
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (~rst_ni) begin
-            valid_mask_q <= '0;
-        end else if (clear_i) begin
-            valid_mask_q <= '0;
-        end else if (write_en_i) begin
-            valid_mask_q[write_word_addr_i] <= 1'b1;
-        end
-    end
 
     if (USE_LATCHES) begin : gen_latches
         logic [NUM_WORDS-1:0] clk_w;

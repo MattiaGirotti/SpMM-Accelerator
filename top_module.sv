@@ -53,13 +53,6 @@ module top_module #(
     output logic [STREAM_WORD_BIT-1:0]                          c_rdata_o
 );
 
-    // --- Buffer Full Status Signals ---
-    logic a_buf_full_o, b_buf_full_o, col_id_buf_full_o, row_ptr_buf_full_o, all_buffers_full;
-    // -------------------------------------------------------------------------
-    // Global Buffer Status
-    // -------------------------------------------------------------------------
-    assign all_buffers_full = a_buf_full_o && b_buf_full_o && col_id_buf_full_o && row_ptr_buf_full_o;
-
     // -------------------------------------------------------------------------
     // Internal Interconnect Signals
     // -------------------------------------------------------------------------
@@ -112,8 +105,7 @@ module top_module #(
         .write_word_addr_i (a_write_word_addr_i),
         .wdata_i           (a_wdata_i),
         .read_addr_i       (a_read_addr),
-        .rdata_a_o         (a_data),
-        .full_o            (a_buf_full_o)
+        .rdata_a_o         (a_data)
     );
 
     b_buffer #(
@@ -132,8 +124,7 @@ module top_module #(
         .write_word_addr_i (b_write_word_addr_i),
         .wdata_i           (b_wdata_i),
         .read_row_addr_i   (b_read_row_addr),
-        .rdata_b_o         (b_data),
-        .full_o            (b_buf_full_o)
+        .rdata_b_o         (b_data)
     );
 
     colID_buffer #(
@@ -150,8 +141,7 @@ module top_module #(
         .write_word_addr_i (col_id_write_word_addr_i),
         .wdata_i           (col_id_wdata_i),
         .read_addr_i       (col_id_read_addr),
-        .rdata_o           (col_id_data),
-        .full_o            (col_id_buf_full_o)
+        .rdata_o           (col_id_data)
     );
 
     row_ptr_buffer #(
@@ -169,8 +159,7 @@ module top_module #(
         .wdata_i           (row_ptr_wdata_i),
         .read_row_idx_i    (row_ptr_read_addr),
         .rdata_start_o     (row_ptr_start),
-        .rdata_end_o       (row_ptr_end),
-        .full_o            (row_ptr_buf_full_o)
+        .rdata_end_o       (row_ptr_end)
     );
 
     // -------------------------------------------------------------------------
@@ -210,7 +199,8 @@ module top_module #(
         .NUM_ROWS       (NUM_ROWS),
         .TOTAL_NNZ      (TOTAL_NNZ),
         .TOTAL_PTRS     (TOTAL_PTRS),
-        .DATA_WIDTH_OUT (DATA_WIDTH_OUT)
+        .DATA_WIDTH_OUT (DATA_WIDTH_OUT),
+        .REGISTERED_READ (REGISTERED_READ)
     ) i_scheduler (
         .clk_i                 (clk_i),
         .rst_ni                (rst_ni),
@@ -218,8 +208,7 @@ module top_module #(
         .start_i               (start_i),
         .busy_o                (busy_o),
         .done_o                (done_o),
-        .preload_done_i        (all_buffers_full),
-
+        
         // Memory Addressing Control
         .row_ptr_read_addr_o   (row_ptr_read_addr),
         .row_ptr_start_i       (row_ptr_start),
@@ -252,6 +241,7 @@ module top_module #(
     datapath #(
         .DATA_WIDTH     (DATA_WIDTH),
         .NUM_MACS       (NUM_MACS),
+        .NUM_ROWS       (NUM_ROWS),
         .DATA_WIDTH_OUT (DATA_WIDTH_OUT)
     ) i_datapath (
         .clk_i            (clk_i),

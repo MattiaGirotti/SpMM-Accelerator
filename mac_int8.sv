@@ -4,9 +4,9 @@ module mac_int8 (
     input  logic               rst_n,   
     input  logic               clr,     // Synchronous clear signal
     input  logic               en,      
-    input  logic signed [7:0]  a,       
-    input  logic signed [7:0]  b,       
-    output logic signed [31:0] acc      
+    input  logic unsigned [7:0]  a,       
+    input  logic unsigned [7:0]  b,       
+    output logic unsigned [31:0] acc      
 );
 
     always_ff @(posedge clk or negedge rst_n) begin

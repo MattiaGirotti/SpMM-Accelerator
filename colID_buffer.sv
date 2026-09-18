@@ -17,10 +17,7 @@ module colID_buffer #(
 
     // --- Read Interface (to Datapath - 1 element at a time) ---
     input  logic [$clog2(TOTAL_ID)-1:0]                        read_addr_i,         // Global address of the single column ID (from 0 to TOTAL_ID-1)
-    output logic unsigned [DATA_WIDTH-1:0]                      rdata_o,             // Single output column ID value (INT8)
-
-    // --- Status Interface ---
-    output logic                                                full_o               // High when all words have been written
+    output logic unsigned [DATA_WIDTH-1:0]                      rdata_o             // Single output column ID value (INT8)
 );
 
     localparam int unsigned ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;               // E.g., 32 / 8 = 4 elements per word
@@ -28,9 +25,6 @@ module colID_buffer #(
 
     // SCM memory matrix linear/block-structured for column IDs
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;
-
-    // Tracking written words to detect full status
-    logic [NUM_WORDS-1:0] valid_mask_q;
 
     // Translation of global read address into internal coordinates [word][element]
     logic [$clog2(NUM_WORDS)-1:0]      r_word_idx;
@@ -42,22 +36,6 @@ module colID_buffer #(
     // Support signal for the combinatorial read multiplexer
     logic signed [DATA_WIDTH-1:0] rdata_comb;
     assign rdata_comb = mem_q[r_word_idx][r_elem_idx];
-
-    // Status output logic
-    assign full_o = &valid_mask_q;
-
-    // -------------------------------------------------------------------------
-    // WRITE SIDE & VALID TRACKING (MEM-SCM)
-    // -------------------------------------------------------------------------
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (~rst_ni) begin
-            valid_mask_q <= '0;
-        end else if (clear_i) begin
-            valid_mask_q <= '0;
-        end else if (write_en_i) begin
-            valid_mask_q[write_word_addr_i] <= 1'b1;
-        end
-    end
 
     if (USE_LATCHES) begin : gen_latches
         // Latch + Clock Gating implementation for area saving (RedMulE style)

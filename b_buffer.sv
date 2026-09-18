@@ -19,10 +19,7 @@ module b_buffer #(
 
     // --- Read Interface (to Datapath MAC Array) --- 
     input  logic [$clog2(NUM_B_ROWS)-1:0]                       read_row_addr_i,   // Address of the B row to read 
-    output logic unsigned [NUM_MACS-1:0][DATA_WIDTH-1:0]        rdata_b_o,         // Read data bus (to Datapath MAC Array) 
-
-    // --- Status Interface ---
-    output logic                                                full_o             // High when all rows and words are written
+    output logic unsigned [NUM_MACS-1:0][DATA_WIDTH-1:0]        rdata_b_o         // Read data bus (to Datapath MAC Array) 
 );
 
     localparam int unsigned WORDS_PER_ROW = (NUM_MACS * DATA_WIDTH) / STREAM_WORD_BIT; 
@@ -30,25 +27,6 @@ module b_buffer #(
 
     // SCM Memory Matrix 
     logic [NUM_B_ROWS-1:0][NUM_MACS-1:0][DATA_WIDTH-1:0] mem_q; 
-
-    // Tracking written words across all rows and word slots
-    logic [NUM_B_ROWS-1:0][WORDS_PER_ROW-1:0] valid_mask_q;
-
-    // Status output logic
-    assign full_o = &valid_mask_q;
-
-    // -------------------------------------------------------------------------
-    // WRITE SIDE & VALID TRACKING (MEM-SCM) 
-    // -------------------------------------------------------------------------
-    always_ff @(posedge clk_i or negedge rst_ni) begin
-        if (~rst_ni) begin
-            valid_mask_q <= '0;
-        end else if (clear_i) begin
-            valid_mask_q <= '0;
-        end else if (write_en_i) begin
-            valid_mask_q[write_row_addr_i][write_word_addr_i] <= 1'b1;
-        end
-    end
 
     if (USE_LATCHES) begin : gen_latches 
         // Latch + Clock Gating implementation for area saving (PULP) 

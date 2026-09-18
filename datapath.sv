@@ -1,6 +1,6 @@
 // ============================================================================
 // Module: datapath
-// Description: HWPE-Stream Compliant Datapath with Valid/Ready Handshakes & Clear
+// Description: HWPE-Stream Compliant Datapath with Stalling-Resilient Registers
 // ============================================================================
 
 module datapath #(
@@ -35,6 +35,10 @@ module datapath #(
     logic [15:0] row_count;
     logic [15:0] current_nnz;
 
+    // Holding registers per proteggere l'elaborazione dagli stall della pipeline (3.C)
+    logic unsigned [DATA_WIDTH-1:0]                data_a_q;
+    logic unsigned [NUM_MACS-1:0][DATA_WIDTH-1:0]   data_b_q;
+
     logic in_hs;
     logic out_hs;
     logic mac_en;
@@ -43,16 +47,28 @@ module datapath #(
     logic row_advance;
 
     // --- HWPE Handshake Events ---
-    // Atomic handshake event on input channel
     assign in_hs  = in_valid_i && in_ready_o;
-    // Atomic handshake event on output channel
     assign out_hs = out_valid_o && out_ready_i;
 
-    // Ready to accept new input only when output buffer/register is not holding unconsumed data
+    // Ready ad accettare nuovi dati solo se il registro di uscita non è bloccato
     assign in_ready_o = !out_valid_o || out_hs;
 
-    // MAC computation enable occurs only on valid input handshake (when non-zero iterations exist)
+    // Abilitazione del MAC: avviene solo sull'evento di handshake
     assign mac_en = in_hs && (current_nnz > 0);
+
+    // --- Sampling Data Input on Handshake (Soluzione 3.C) ---
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+            data_a_q <= '0;
+            data_b_q <= '0;
+        end else if (clear_i) begin
+            data_a_q <= '0;
+            data_b_q <= '0;
+        end else if (in_hs) begin
+            data_a_q <= data_a_i;
+            data_b_q <= data_b_i;
+        end
+    end
 
     // --- Sampling & Row Advance Logic ---
     assign sync_clear  = (iteration_count == current_nnz) && (current_nnz > 0);
@@ -102,20 +118,17 @@ module datapath #(
         end
     end
 
-    // --- MAC Module Instances ---
+    // --- MAC Module Instances (Utilizzano i dati stabili da data_a_q e data_b_q) ---
     genvar i;
     generate
         for (i = 0; i < NUM_MACS; i++) begin : mac_instances
-            mac_int8 #(
-                .DATA_WIDTH     (DATA_WIDTH),
-                .DATA_WIDTH_OUT (DATA_WIDTH_OUT)
-            ) u_mac (
+            mac_int8 u_mac (
                 .clk   (clk_i),
                 .rst_n (rst_ni),
                 .clr   (clear_i || row_advance),
                 .en    (mac_en),
-                .a     (data_a_i),
-                .b     (data_b_i[i]),
+                .a     (data_a_q),
+                .b     (data_b_q[i]),
                 .acc   (mac_acc_out[i])
             );
         end
@@ -132,12 +145,10 @@ module datapath #(
             matrix_end_o <= 1'b0;
             out_valid_o  <= 1'b0; 
         end else begin
-            // HWPE Rule 4: Valid can deassert ONLY in the cycle after a valid handshake
             if (out_hs) begin
                 out_valid_o <= 1'b0;
             end
 
-            // Assert valid when a row computation finishes
             if (row_advance) begin
                 out_valid_o  <= 1'b1;
                 matrix_end_o <= (row_count == NUM_ROWS - 1);
