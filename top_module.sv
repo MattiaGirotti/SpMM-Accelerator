@@ -3,6 +3,7 @@
 // Description: Integrated CSR SpMM Accelerator.
 //              SCM Buffers (A, B, ColID, RowPtr, C) connected directly 
 //              to Datapath for data processing, controlled by Scheduler FSM.
+//              Fixed bit-width parameterization for row_ptr_write_word_addr_i.
 // ============================================================================
 
 module top_module #(
@@ -42,9 +43,9 @@ module top_module #(
     input  logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] col_id_write_word_addr_i,
     input  logic [STREAM_WORD_BIT-1:0]                          col_id_wdata_i,
 
-    // row_ptr_buffer write port
+    // row_ptr_buffer write port (Fixed: Localparam derivation for clean bit-width sizing)
     input  logic                                                row_ptr_write_en_i,
-    input  logic [$clog2(((TOTAL_PTRS + (STREAM_WORD_BIT/16) - 1)/(STREAM_WORD_BIT/16)))-1:0] row_ptr_write_word_addr_i,
+    input  logic [$clog2(ROW_PTR_NUM_WORDS)-1:0]               row_ptr_write_word_addr_i,
     input  logic [STREAM_WORD_BIT-1:0]                          row_ptr_wdata_i,
 
     // --- Read Interface to HWPE Streamer for Output Matrix C ---
@@ -54,13 +55,19 @@ module top_module #(
 );
 
     // -------------------------------------------------------------------------
+    // Local Parameters for Sub-module Port Alignment
+    // -------------------------------------------------------------------------
+    localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
+    localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD;
+
+    // -------------------------------------------------------------------------
     // Internal Interconnect Signals
     // -------------------------------------------------------------------------
 
     // row_ptr_buffer <-> scheduler
     logic [$clog2(TOTAL_PTRS-1)-1:0]                   row_ptr_read_addr;
-    logic [15:0]                                        row_ptr_start;
-    logic [15:0]                                        row_ptr_end;
+    logic [DATA_WIDTH-1:0]                                        row_ptr_start;
+    logic [DATA_WIDTH-1:0]                                        row_ptr_end;
 
     // colID_buffer <-> scheduler
     logic [$clog2(TOTAL_NNZ)-1:0]                      col_id_read_addr;
@@ -81,7 +88,7 @@ module top_module #(
     // scheduler <-> datapath (Handshake & Control Channel)
     logic                                               dp_in_valid;
     logic                                               dp_in_ready;
-    logic [15:0]                                        dp_nnz_iterations;
+    logic [DATA_WIDTH-1:0]                              dp_nnz_iterations;
     logic                                               dp_out_valid;
     logic                                               dp_out_ready;
     logic unsigned [NUM_MACS-1:0][DATA_WIDTH_OUT-1:0]    dp_data_out;
@@ -145,7 +152,7 @@ module top_module #(
     );
 
     row_ptr_buffer #(
-        .DATA_WIDTH      (16),
+        .DATA_WIDTH      (DATA_WIDTH),
         .TOTAL_PTRS      (TOTAL_PTRS),
         .STREAM_WORD_BIT (STREAM_WORD_BIT),
         .REGISTERED_READ (REGISTERED_READ),
@@ -177,13 +184,9 @@ module top_module #(
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
         .clear_i           (clear_i),
-        
-        // Write Port: Controlled by Scheduler + Data directly from Datapath
         .write_en_i        (c_buf_write_en),
         .write_row_addr_i  (c_buf_write_row_addr),
         .wdata_i           (dp_data_out),
-
-        // Read Port: Exposed to top-level Streamer
         .read_row_addr_i   (c_read_row_addr_i),
         .read_word_addr_i  (c_read_word_addr_i),
         .rdata_c_o         (c_rdata_o)
@@ -194,12 +197,12 @@ module top_module #(
     // -------------------------------------------------------------------------
 
     scheduler #(
-        .DATA_WIDTH     (DATA_WIDTH),
-        .NUM_MACS       (NUM_MACS),
-        .NUM_ROWS       (NUM_ROWS),
-        .TOTAL_NNZ      (TOTAL_NNZ),
-        .TOTAL_PTRS     (TOTAL_PTRS),
-        .DATA_WIDTH_OUT (DATA_WIDTH_OUT),
+        .DATA_WIDTH      (DATA_WIDTH),
+        .NUM_MACS        (NUM_MACS),
+        .NUM_ROWS        (NUM_ROWS),
+        .TOTAL_NNZ       (TOTAL_NNZ),
+        .TOTAL_PTRS      (TOTAL_PTRS),
+        .DATA_WIDTH_OUT  (DATA_WIDTH_OUT),
         .REGISTERED_READ (REGISTERED_READ)
     ) i_scheduler (
         .clk_i                 (clk_i),
@@ -208,27 +211,18 @@ module top_module #(
         .start_i               (start_i),
         .busy_o                (busy_o),
         .done_o                (done_o),
-        
-        // Memory Addressing Control
         .row_ptr_read_addr_o   (row_ptr_read_addr),
         .row_ptr_start_i       (row_ptr_start),
         .row_ptr_end_i         (row_ptr_end),
-
         .col_id_read_addr_o    (col_id_read_addr),
         .col_id_i              (col_id_data),
-
         .a_read_addr_o         (a_read_addr),
-        
         .b_read_row_addr_o     (b_read_row_addr),
-        
         .c_write_en_o          (c_buf_write_en),
         .c_write_row_addr_o    (c_buf_write_row_addr),
-
-        // Datapath Handshake Control
         .dp_in_valid_o         (dp_in_valid),
         .dp_in_ready_i         (dp_in_ready),
         .dp_nnz_iterations_o   (dp_nnz_iterations),
-
         .dp_out_valid_i        (dp_out_valid),
         .dp_out_ready_o        (dp_out_ready),
         .dp_matrix_end_i       (dp_matrix_end)
@@ -249,14 +243,10 @@ module top_module #(
         .clear_i          (clear_i),
         .nnz_iterations_i (dp_nnz_iterations),
         .matrix_end_o     (dp_matrix_end),
-
-        // Input Channel: Handshake from Scheduler, Data directly from A & B Buffers
         .in_valid_i       (dp_in_valid),
         .in_ready_o       (dp_in_ready),
         .data_a_i         (a_data),
         .data_b_i         (b_data),
-
-        // Output Channel: Handshake from Scheduler, Data directly to C Buffer
         .out_valid_o      (dp_out_valid),
         .out_ready_i      (dp_out_ready),
         .data_out_o       (dp_data_out)

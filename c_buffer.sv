@@ -1,4 +1,9 @@
-// SCM Buffer Module for Output Matrix C (CSR SpMM Accelerators for PULP Cluster)
+// ============================================================================
+// Module: c_buffer
+// Description: SCM Buffer Module for Output Matrix C (CSR SpMM for PULP).
+//              Fixed multi-word assignment bug from multi-MAC output vector.
+// ============================================================================
+
 module c_buffer #(
     parameter int unsigned DATA_WIDTH_OUT  = 32,          // INT32 output width from MAC array
     parameter int unsigned NUM_MACS        = 4,           // Number of parallel output columns
@@ -14,11 +19,11 @@ module c_buffer #(
     // --- Write Interface (from Datapath MAC Array) ---
     input  logic                                                write_en_i,        // Row write enable
     input  logic [$clog2(NUM_C_ROWS)-1:0]                       write_row_addr_i,  // Address of C row to write
-    input  logic unsigned [NUM_MACS-1:0][DATA_WIDTH_OUT-1:0]      wdata_i,           // Full row data from Datapath
+    input  logic unsigned [NUM_MACS-1:0][DATA_WIDTH_OUT-1:0]    wdata_i,           // Full row data from Datapath
 
     // --- Read Interface (to HWPE Streamer) ---
     input  logic [$clog2(NUM_C_ROWS)-1:0]                       read_row_addr_i,   // Row address to read
-    input  logic [$clog2((NUM_MACS*DATA_WIDTH_OUT)/STREAM_WORD_BIT)-1:0] read_word_addr_i, // 32-bit word index inside the row
+    input  logic [$clog2((NUM_MACS*DATA_WIDTH_OUT)/STREAM_WORD_BIT)-1:0] read_word_addr_i, // 32-bit word index inside row
     output logic [STREAM_WORD_BIT-1:0]                          rdata_c_o          // 32-bit output word to Streamer
 );
 
@@ -26,6 +31,10 @@ module c_buffer #(
 
     // SCM Memory Matrix organized in Rows and 32-bit Words
     logic [NUM_C_ROWS-1:0][WORDS_PER_ROW-1:0][STREAM_WORD_BIT-1:0] mem_q;
+
+    // Flatten input data vector to allow safe bit-slicing across streamer words
+    logic [NUM_MACS*DATA_WIDTH_OUT-1:0] wdata_flat;
+    assign wdata_flat = wdata_i;
 
     // Support signal for combinatorial read
     logic [STREAM_WORD_BIT-1:0] rdata_comb;
@@ -54,7 +63,8 @@ module c_buffer #(
                         end
                     end else begin
                         for (int w = 0; w < WORDS_PER_ROW; w++) begin
-                            mem_q[r][w] = wdata_i[w];
+                            // Fixed: Explicit bit-slicing using flattened input vector
+                            mem_q[r][w] = wdata_flat[w*STREAM_WORD_BIT +: STREAM_WORD_BIT];
                         end
                     end
                 end
@@ -69,7 +79,8 @@ module c_buffer #(
                 mem_q <= '0;
             end else if (write_en_i) begin
                 for (int w = 0; w < WORDS_PER_ROW; w++) begin
-                    mem_q[write_row_addr_i][w] <= wdata_i[w];
+                    // Fixed: Explicit bit-slicing using flattened input vector
+                    mem_q[write_row_addr_i][w] <= wdata_flat[w*STREAM_WORD_BIT +: STREAM_WORD_BIT];
                 end
             end
         end

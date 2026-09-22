@@ -1,6 +1,6 @@
 // SCM Buffer Module for the Row Pointer Array (CSR SpMM)  
 module row_ptr_buffer #(
-    parameter int unsigned DATA_WIDTH      = 16,
+    parameter int unsigned DATA_WIDTH      = 8,
     parameter int unsigned TOTAL_PTRS      = 65,
     parameter int unsigned STREAM_WORD_BIT = 32,
     parameter bit          REGISTERED_READ = 1,
