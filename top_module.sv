@@ -14,7 +14,6 @@ module top_module #(
     parameter int unsigned TOTAL_PTRS      = 65,          // Total row pointers (NUM_ROWS + 1)
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
     parameter int unsigned DATA_WIDTH_OUT  = 32,          // INT32 output precision
-    parameter bit          REGISTERED_READ = 1,          // 1: 1-cycle latency SCM read
     parameter bit          USE_LATCHES     = 0           // 1: Clock Gating + Latches, 0: Flip-Flops
 )(
     input  logic                                                clk_i,
@@ -101,8 +100,7 @@ module top_module #(
     a_buffer #(
         .DATA_WIDTH      (DATA_WIDTH),
         .TOTAL_NNZ       (TOTAL_NNZ),
-        .STREAM_WORD_BIT (STREAM_WORD_BIT),
-        .REGISTERED_READ (REGISTERED_READ),
+        .STREAM_WORD_BIT (STREAM_WORD_BIT),       
         .USE_LATCHES     (USE_LATCHES)
     ) i_a_buffer (
         .clk_i             (clk_i),
@@ -119,8 +117,7 @@ module top_module #(
         .DATA_WIDTH      (DATA_WIDTH),
         .NUM_MACS        (NUM_MACS),
         .NUM_B_ROWS      (NUM_ROWS),
-        .STREAM_WORD_BIT (STREAM_WORD_BIT),
-        .REGISTERED_READ (REGISTERED_READ),
+        .STREAM_WORD_BIT (STREAM_WORD_BIT),    
         .USE_LATCHES     (USE_LATCHES)
     ) i_b_buffer (
         .clk_i             (clk_i),
@@ -138,7 +135,6 @@ module top_module #(
         .DATA_WIDTH      (DATA_WIDTH),
         .TOTAL_ID        (TOTAL_NNZ),
         .STREAM_WORD_BIT (STREAM_WORD_BIT),
-        .REGISTERED_READ (REGISTERED_READ),
         .USE_LATCHES     (USE_LATCHES)
     ) i_colID_buffer (
         .clk_i             (clk_i),
@@ -155,7 +151,6 @@ module top_module #(
         .DATA_WIDTH      (DATA_WIDTH),
         .TOTAL_PTRS      (TOTAL_PTRS),
         .STREAM_WORD_BIT (STREAM_WORD_BIT),
-        .REGISTERED_READ (REGISTERED_READ),
         .USE_LATCHES     (USE_LATCHES)
     ) i_row_ptr_buffer (
         .clk_i             (clk_i),
@@ -178,7 +173,6 @@ module top_module #(
         .NUM_MACS        (NUM_MACS),
         .NUM_C_ROWS      (NUM_ROWS),
         .STREAM_WORD_BIT (STREAM_WORD_BIT),
-        .REGISTERED_READ (REGISTERED_READ),
         .USE_LATCHES     (USE_LATCHES)
     ) i_c_buffer (
         .clk_i             (clk_i),
@@ -202,8 +196,7 @@ module top_module #(
         .NUM_ROWS        (NUM_ROWS),
         .TOTAL_NNZ       (TOTAL_NNZ),
         .TOTAL_PTRS      (TOTAL_PTRS),
-        .DATA_WIDTH_OUT  (DATA_WIDTH_OUT),
-        .REGISTERED_READ (REGISTERED_READ)
+        .DATA_WIDTH_OUT  (DATA_WIDTH_OUT)
     ) i_scheduler (
         .clk_i                 (clk_i),
         .rst_ni                (rst_ni),

@@ -4,7 +4,6 @@ module b_buffer #(
     parameter int unsigned NUM_MACS        = 4,           // Number of parallel B columns (MACs) 
     parameter int unsigned NUM_B_ROWS      = 32,          // Maximum number of storable B rows 
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width 
-    parameter bit          REGISTERED_READ = 1,          // 1: Registered read (1 cycle latency), 0: Combinatorial (0 cycles) 
     parameter bit          USE_LATCHES     = 0           // 1: Use Clock Gating + Latches (RedMulE style) 
 )(
     input  logic                                                clk_i,
@@ -27,6 +26,8 @@ module b_buffer #(
 
     // SCM Memory Matrix 
     logic [NUM_B_ROWS-1:0][NUM_MACS-1:0][DATA_WIDTH-1:0] mem_q; 
+
+    assign rdata_b_o = mem_q[read_row_addr_i];
 
     if (USE_LATCHES) begin : gen_latches 
         // Latch + Clock Gating implementation for area saving (PULP) 
@@ -69,25 +70,6 @@ module b_buffer #(
                 end
             end
         end
-    end
-
-    // -------------------------------------------------------------------------
-    // READ SIDE (Read Logic) (SCM-Datapath) 
-    // -------------------------------------------------------------------------
-    if (REGISTERED_READ) begin : gen_reg_read 
-        // Read with 1 cycle latency (recommended for high f_MAX) 
-        always_ff @(posedge clk_i or negedge rst_ni) begin 
-            if (~rst_ni) begin 
-                rdata_b_o <= '0; 
-            end else if (clear_i) begin
-                rdata_b_o <= '0;
-            end else begin
-                rdata_b_o <= mem_q[read_row_addr_i]; 
-            end
-        end
-    end else begin : gen_comb_read 
-        // Purely combinatorial read (0 cycles latency) 
-        assign rdata_b_o = mem_q[read_row_addr_i]; 
-    end
+    end 
 
 endmodule

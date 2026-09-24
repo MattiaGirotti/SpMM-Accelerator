@@ -3,7 +3,6 @@ module row_ptr_buffer #(
     parameter int unsigned DATA_WIDTH      = 8,
     parameter int unsigned TOTAL_PTRS      = 65,
     parameter int unsigned STREAM_WORD_BIT = 32,
-    parameter bit          REGISTERED_READ = 1,
     parameter bit          USE_LATCHES     = 0,
     // Derived parameters added to size the ports  
     parameter int unsigned ELEMS_PER_WORD  = STREAM_WORD_BIT / DATA_WIDTH,
@@ -43,12 +42,8 @@ module row_ptr_buffer #(
     assign r2_word_idx  = next_row_idx / ELEMS_PER_WORD;
     assign r2_elem_idx  = next_row_idx % ELEMS_PER_WORD;
 
-    // Support signals for combinational read multiplexers  
-    logic [DATA_WIDTH-1:0] rdata_start_comb;
-    logic [DATA_WIDTH-1:0] rdata_end_comb;
-
-    assign rdata_start_comb = mem_q[r1_word_idx][r1_elem_idx];
-    assign rdata_end_comb   = mem_q[r2_word_idx][r2_elem_idx];
+    assign rdata_start_o = mem_q[r1_word_idx][r1_elem_idx];
+    assign rdata_end_o   = mem_q[r2_word_idx][r2_elem_idx];
 
     if (USE_LATCHES) begin : gen_latches
         logic [NUM_WORDS-1:0] clk_w;
@@ -87,27 +82,6 @@ module row_ptr_buffer #(
                 end
             end
         end
-    end
-
-// -------------------------------------------------------------------------
-    // READ SIDE (Read Logic) (SCM-Datapath)  
-    // -------------------------------------------------------------------------
-    if (REGISTERED_READ) begin : gen_reg_read
-        always_ff @(posedge clk_i or negedge rst_ni) begin
-            if (~rst_ni) begin
-                rdata_start_o <= '0;
-                rdata_end_o   <= '0;
-            end else if (clear_i) begin
-                rdata_start_o <= '0;
-                rdata_end_o   <= '0;
-            end else begin
-                rdata_start_o <= rdata_start_comb;
-                rdata_end_o   <= rdata_end_comb;
-            end
-        end
-    end else begin : gen_comb_read
-        assign rdata_start_o = rdata_start_comb;
-        assign rdata_end_o   = rdata_end_comb;
     end
 
 endmodule

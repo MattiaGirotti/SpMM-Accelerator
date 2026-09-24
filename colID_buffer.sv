@@ -3,7 +3,6 @@ module colID_buffer #(
     parameter int unsigned DATA_WIDTH      = 8,           // INT8 (size of a single column ID)
     parameter int unsigned TOTAL_ID        = 64,          // Maximum total number of storable column IDs
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
-    parameter bit          REGISTERED_READ = 1,          // 1: Registered read (1 cycle latency), 0: Combinatorial (0 cycles)
     parameter bit          USE_LATCHES     = 0           // 1: Use Clock Gating + Latches (RedMulE style), 0: Flip-Flops
 )(
     input  logic                                                clk_i,
@@ -33,9 +32,7 @@ module colID_buffer #(
     assign r_word_idx = read_addr_i / ELEMS_PER_WORD;
     assign r_elem_idx = read_addr_i % ELEMS_PER_WORD;
 
-    // Support signal for the combinatorial read multiplexer
-    logic signed [DATA_WIDTH-1:0] rdata_comb;
-    assign rdata_comb = mem_q[r_word_idx][r_elem_idx];
+    assign rdata_o = mem_q[r_word_idx][r_elem_idx];
 
     if (USE_LATCHES) begin : gen_latches
         // Latch + Clock Gating implementation for area saving (RedMulE style)
@@ -74,25 +71,6 @@ module colID_buffer #(
                 end
             end
         end
-    end
-
-    // -------------------------------------------------------------------------
-    // READ SIDE (Read Logic) (SCM-Datapath)
-    // -------------------------------------------------------------------------
-    if (REGISTERED_READ) begin : gen_reg_read
-        // Read with 1 cycle latency (recommended for high frequencies)
-        always_ff @(posedge clk_i or negedge rst_ni) begin
-            if (~rst_ni) begin
-                rdata_o <= '0;
-            end else if (clear_i) begin
-                rdata_o <= '0;
-            end else begin
-                rdata_o <= rdata_comb;
-            end
-        end
-    end else begin : gen_comb_read
-        // Purely combinatorial read (0 cycles latency)
-        assign rdata_o = rdata_comb;
     end
 
 endmodule

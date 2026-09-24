@@ -3,7 +3,6 @@ module a_buffer #(
     parameter int unsigned DATA_WIDTH      = 8,           // INT8 (size of a single NNZ value)
     parameter int unsigned TOTAL_NNZ       = 64,          // Maximum total number of storable NNZ values
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
-    parameter bit          REGISTERED_READ = 1,          // 1: Registered read (1 cycle), 0: Combinatorial (0 cycles)
     parameter bit          USE_LATCHES     = 0           // 1: Use Clock Gating + Latches (RedMulE style), 0: Flip-Flop
 )(
     input  logic                                                clk_i,
@@ -32,10 +31,8 @@ module a_buffer #(
 
     assign r_word_idx = read_addr_i / ELEMS_PER_WORD;
     assign r_elem_idx = read_addr_i % ELEMS_PER_WORD;
-
-    // Support signal for the combinatorial read multiplexer 
-    logic signed [DATA_WIDTH-1:0] rdata_comb;
-    assign rdata_comb = mem_q[r_word_idx][r_elem_idx];
+ 
+    assign rdata_a_o = mem_q[r_word_idx][r_elem_idx];
 
     if (USE_LATCHES) begin : gen_latches
         // Implementation based on Latch + Clock Gating for area saving (RedMulE style) 
@@ -74,25 +71,6 @@ module a_buffer #(
                 end
             end
         end
-    end
-
-    // -------------------------------------------------------------------------
-    // READ SIDE (Read Logic) (SCM-Datapath) 
-    // -------------------------------------------------------------------------
-    if (REGISTERED_READ) begin : gen_reg_read
-        // Read with 1 cycle latency (recommended for high frequencies) 
-        always_ff @(posedge clk_i or negedge rst_ni) begin
-            if (~rst_ni) begin
-                rdata_a_o <= '0;
-            end else if (clear_i) begin
-                rdata_a_o <= '0;
-            end else begin
-                rdata_a_o <= rdata_comb;
-            end
-        end
-    end else begin : gen_comb_read
-        // Purely combinatorial read (0 cycles latency) 
-        assign rdata_a_o = rdata_comb;
     end
 
 endmodule

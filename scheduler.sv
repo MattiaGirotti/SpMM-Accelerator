@@ -1,5 +1,5 @@
 // ============================================================================
-// Module: scheduler (Correct synchronization for REGISTERED_READ = 0 and 1)
+// Module: scheduler 
 // ============================================================================
 
 module scheduler #(
@@ -8,8 +8,7 @@ module scheduler #(
     parameter int unsigned NUM_ROWS        = 4,
     parameter int unsigned TOTAL_NNZ       = 64,
     parameter int unsigned TOTAL_PTRS      = 65,
-    parameter int unsigned DATA_WIDTH_OUT  = 32,
-    parameter bit          REGISTERED_READ = 0
+    parameter int unsigned DATA_WIDTH_OUT  = 32
 )(
     input  logic                                                clk_i,
     input  logic                                                rst_ni,
@@ -126,17 +125,9 @@ module scheduler #(
 
         row_ptr_read_addr_o = row_idx_q;
         
-        if (REGISTERED_READ) begin
-            // Addresses driven by the current state for the registered pipeline
-            col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
-            a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
-            b_read_row_addr_o  = b_row_addr_q;
-        end else begin
-            // Immediate combinational read
-            col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
-            a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
-            b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
-        end
+        col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
+        a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
+        b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
 
         c_write_en_o        = 1'b0;
         c_write_row_addr_o  = row_idx_q;
@@ -158,47 +149,16 @@ module scheduler #(
 
             FETCH_ROW_PTR: begin
                 row_ptr_read_addr_o = row_idx_q;
-                if (REGISTERED_READ)
-                    next_state = WAIT_ROW_PTR;
-                else
-                    next_state = CALC_NNZ;
-            end
-
-            WAIT_ROW_PTR: begin
-                row_ptr_read_addr_o = row_idx_q;
-                next_state          = CALC_NNZ;
+                next_state = CALC_NNZ;
             end
 
             CALC_NNZ: begin
                 row_ptr_read_addr_o = row_idx_q;
                 nnz_total_d         = row_ptr_end_i - row_ptr_start_i;
                 nnz_count_d         = '0;
-                
-                if ((row_ptr_end_i - row_ptr_start_i) == 8'd0) begin
-                    next_state = PROCESS_NNZ; // Empty row
-                end else begin
-                    if (REGISTERED_READ)
-                        next_state = ADDR_COL_A;
-                    else
-                        next_state = PROCESS_NNZ;
-                end
+                next_state = PROCESS_NNZ;
             end
 
-            // [REGISTERED_READ = 1] Cycle 1: Request col_id and A data
-            ADDR_COL_A: begin
-                col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
-                a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
-                next_state         = FETCH_B;
-            end
-
-            // [REGISTERED_READ = 1] Cycle 2: Receive col_id_i and request row from b_buffer
-            FETCH_B: begin
-                b_row_addr_d       = col_id_i[$clog2(NUM_ROWS)-1:0];
-                b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
-                next_state         = PROCESS_NNZ;
-            end
-
-            // [REGISTERED_READ = 1] Cycle 3: A and B are ready at buffer outputs -> Handshake
             PROCESS_NNZ: begin
                 if (nnz_total_q == 8'd0) begin
                     dp_in_valid_o = 1'b1;
@@ -214,10 +174,7 @@ module scheduler #(
                             next_state       = WAIT_DP_OUT;
                         end else begin
                             nnz_count_d = nnz_count_q + 8'd1;
-                            if (REGISTERED_READ)
-                                next_state = ADDR_COL_A;
-                            else
-                                next_state = PROCESS_NNZ;
+                            next_state = PROCESS_NNZ;
                         end
                     end
                 end

@@ -10,7 +10,6 @@ module top_module_tb;
     parameter int unsigned TOTAL_PTRS      = 65;
     parameter int unsigned STREAM_WORD_BIT = 32;
     parameter int unsigned DATA_WIDTH_OUT  = 32;
-    parameter bit          REGISTERED_READ = 0;
     parameter bit          USE_LATCHES     = 0;
 
     localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
@@ -64,7 +63,6 @@ module top_module_tb;
         .TOTAL_PTRS      (TOTAL_PTRS),
         .STREAM_WORD_BIT (STREAM_WORD_BIT),
         .DATA_WIDTH_OUT  (DATA_WIDTH_OUT),
-        .REGISTERED_READ (REGISTERED_READ),
         .USE_LATCHES     (USE_LATCHES)
     ) u_top (
         .clk_i                      (clk_i),

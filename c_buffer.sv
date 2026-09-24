@@ -9,7 +9,6 @@ module c_buffer #(
     parameter int unsigned NUM_MACS        = 4,           // Number of parallel output columns
     parameter int unsigned NUM_C_ROWS      = 32,          // Maximum number of storable C rows
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
-    parameter bit          REGISTERED_READ = 1,          // 1: Registered read (1 cycle), 0: Combinatorial
     parameter bit          USE_LATCHES     = 0           // 1: Use Clock Gating + Latches, 0: Flip-Flop
 )(
     input  logic                                                clk_i,
@@ -36,9 +35,7 @@ module c_buffer #(
     logic [NUM_MACS*DATA_WIDTH_OUT-1:0] wdata_flat;
     assign wdata_flat = wdata_i;
 
-    // Support signal for combinatorial read
-    logic [STREAM_WORD_BIT-1:0] rdata_comb;
-    assign rdata_comb = mem_q[read_row_addr_i][read_word_addr_i];
+    assign rdata_c_o = mem_q[read_row_addr_i][read_word_addr_i];
 
     // -------------------------------------------------------------------------
     // WRITE SIDE (Write Logic) (Datapath -> SCM)
@@ -84,25 +81,6 @@ module c_buffer #(
                 end
             end
         end
-    end
-
-    // -------------------------------------------------------------------------
-    // READ SIDE (Read Logic) (SCM -> HWPE Streamer)
-    // -------------------------------------------------------------------------
-    if (REGISTERED_READ) begin : gen_reg_read
-        // Read with 1 cycle latency
-        always_ff @(posedge clk_i or negedge rst_ni) begin
-            if (~rst_ni) begin
-                rdata_c_o <= '0;
-            end else if (clear_i) begin
-                rdata_c_o <= '0;
-            end else begin
-                rdata_c_o <= rdata_comb;
-            end
-        end
-    end else begin : gen_comb_read
-        // Purely combinatorial read (0 cycles latency)
-        assign rdata_c_o = rdata_comb;
     end
 
 endmodule
