@@ -1,6 +1,5 @@
 // ============================================================================
-// Module: scheduler
-// Description: FSM Scheduler for CSR SpMM Accelerator
+// Module: scheduler (Correct synchronization for REGISTERED_READ = 0 and 1)
 // ============================================================================
 
 module scheduler #(
@@ -51,11 +50,13 @@ module scheduler #(
     input  logic                                                dp_matrix_end_i
 );
 
-    typedef enum logic [2:0] {
+    typedef enum logic [3:0] {
         IDLE,
         FETCH_ROW_PTR,
+        WAIT_ROW_PTR,
         CALC_NNZ,
-        WAIT_SCM_ADDR,
+        ADDR_COL_A,
+        FETCH_B,
         PROCESS_NNZ,
         WAIT_DP_OUT,
         STORE_C,
@@ -69,7 +70,8 @@ module scheduler #(
     logic [7:0]                  nnz_count_q, nnz_count_d;
     logic [7:0]                  nnz_total_q, nnz_total_d;
     logic [7:0]                  global_nnz_ptr_q, global_nnz_ptr_d;
-    logic [DATA_WIDTH-1:0]       col_id_q, col_id_d;
+    logic [$clog2(NUM_ROWS)-1:0] b_row_addr_q, b_row_addr_d;
+    logic [$clog2(TOTAL_NNZ)-1:0] a_addr_reg_q, a_addr_reg_d;
 
     logic dp_in_hs;
     logic dp_out_hs;
@@ -77,6 +79,9 @@ module scheduler #(
     assign dp_in_hs  = dp_in_valid_o && dp_in_ready_i;
     assign dp_out_hs = dp_out_valid_i && dp_out_ready_o;
 
+    // -------------------------------------------------------------------------
+    // Sequential Process
+    // -------------------------------------------------------------------------
     always_ff @(posedge clk_i or negedge rst_ni) begin
         if (!rst_ni) begin
             current_state    <= IDLE;
@@ -84,40 +89,54 @@ module scheduler #(
             nnz_count_q      <= '0;
             nnz_total_q      <= '0;
             global_nnz_ptr_q <= '0;
-            col_id_q         <= '0;
+            b_row_addr_q     <= '0;
+            a_addr_reg_q     <= '0;
         end else if (clear_i) begin
             current_state    <= IDLE;
             row_idx_q        <= '0;
             nnz_count_q      <= '0;
             nnz_total_q      <= '0;
             global_nnz_ptr_q <= '0;
-            col_id_q         <= '0;
+            b_row_addr_q     <= '0;
+            a_addr_reg_q     <= '0;
         end else begin
             current_state    <= next_state;
             row_idx_q        <= row_idx_d;
             nnz_count_q      <= nnz_count_d;
             nnz_total_q      <= nnz_total_d;
             global_nnz_ptr_q <= global_nnz_ptr_d;
-            col_id_q         <= col_id_d;
+            b_row_addr_q     <= b_row_addr_d;
+            a_addr_reg_q     <= a_addr_reg_d;
         end
     end
 
+    // -------------------------------------------------------------------------
+    // Combinational Process
+    // -------------------------------------------------------------------------
     always_comb begin
         next_state          = current_state;
         row_idx_d           = row_idx_q;
         nnz_count_d         = nnz_count_q;
         nnz_total_d         = nnz_total_q;
         global_nnz_ptr_d    = global_nnz_ptr_q;
-        col_id_d            = col_id_q;
+        b_row_addr_d        = b_row_addr_q;
 
         busy_o              = 1'b1;
         done_o              = 1'b0;
 
         row_ptr_read_addr_o = row_idx_q;
-        col_id_read_addr_o  = global_nnz_ptr_q + nnz_count_q;
-        a_read_addr_o       = global_nnz_ptr_q + nnz_count_q;
         
-        b_read_row_addr_o   = REGISTERED_READ ? col_id_q[$clog2(NUM_ROWS)-1:0] : col_id_i[$clog2(NUM_ROWS)-1:0];
+        if (REGISTERED_READ) begin
+            // Addresses driven by the current state for the registered pipeline
+            col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
+            a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
+            b_read_row_addr_o  = b_row_addr_q;
+        end else begin
+            // Immediate combinational read
+            col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
+            a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
+            b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
+        end
 
         c_write_en_o        = 1'b0;
         c_write_row_addr_o  = row_idx_q;
@@ -139,6 +158,14 @@ module scheduler #(
 
             FETCH_ROW_PTR: begin
                 row_ptr_read_addr_o = row_idx_q;
+                if (REGISTERED_READ)
+                    next_state = WAIT_ROW_PTR;
+                else
+                    next_state = CALC_NNZ;
+            end
+
+            WAIT_ROW_PTR: begin
+                row_ptr_read_addr_o = row_idx_q;
                 next_state          = CALC_NNZ;
             end
 
@@ -147,32 +174,48 @@ module scheduler #(
                 nnz_total_d         = row_ptr_end_i - row_ptr_start_i;
                 nnz_count_d         = '0;
                 
-                if (REGISTERED_READ)
-                    next_state = WAIT_SCM_ADDR;
-                else
-                    next_state = PROCESS_NNZ;
+                if ((row_ptr_end_i - row_ptr_start_i) == 8'd0) begin
+                    next_state = PROCESS_NNZ; // Empty row
+                end else begin
+                    if (REGISTERED_READ)
+                        next_state = ADDR_COL_A;
+                    else
+                        next_state = PROCESS_NNZ;
+                end
             end
 
-            WAIT_SCM_ADDR: begin
-                col_id_d   = col_id_i;
-                next_state = PROCESS_NNZ;
+            // [REGISTERED_READ = 1] Cycle 1: Request col_id and A data
+            ADDR_COL_A: begin
+                col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
+                a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
+                next_state         = FETCH_B;
             end
 
+            // [REGISTERED_READ = 1] Cycle 2: Receive col_id_i and request row from b_buffer
+            FETCH_B: begin
+                b_row_addr_d       = col_id_i[$clog2(NUM_ROWS)-1:0];
+                b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
+                next_state         = PROCESS_NNZ;
+            end
+
+            // [REGISTERED_READ = 1] Cycle 3: A and B are ready at buffer outputs -> Handshake
             PROCESS_NNZ: begin
-                dp_in_valid_o = 1'b1;
-
-                if (dp_in_hs) begin
-                    if (nnz_total_q == 8'd0) begin
+                if (nnz_total_q == 8'd0) begin
+                    dp_in_valid_o = 1'b1;
+                    if (dp_in_hs) begin
                         next_state = WAIT_DP_OUT;
-                    end else begin
-                        nnz_count_d = nnz_count_q + 8'd1;
-                                               
+                    end
+                end else begin
+                    dp_in_valid_o = 1'b1; // Now both data_a and data_b are stable at the datapath inputs
+
+                    if (dp_in_hs) begin
                         if (nnz_count_q == nnz_total_q - 8'd1) begin
                             global_nnz_ptr_d = global_nnz_ptr_q + nnz_total_q;
                             next_state       = WAIT_DP_OUT;
                         end else begin
+                            nnz_count_d = nnz_count_q + 8'd1;
                             if (REGISTERED_READ)
-                                next_state = WAIT_SCM_ADDR;
+                                next_state = ADDR_COL_A;
                             else
                                 next_state = PROCESS_NNZ;
                         end
