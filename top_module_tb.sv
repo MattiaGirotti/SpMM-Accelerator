@@ -4,8 +4,8 @@ module top_module_tb;
 
     // --- Module Parameters ---
     parameter int unsigned DATA_WIDTH      = 8;
-    parameter int unsigned NUM_MACS        = 4;
-    parameter int unsigned NUM_ROWS        = 4;
+    parameter int unsigned NUM_MACS        = 16;
+    parameter int unsigned NUM_ROWS        = 16;
     parameter int unsigned TOTAL_NNZ       = 64;
     parameter int unsigned TOTAL_PTRS      = 65;
     parameter int unsigned STREAM_WORD_BIT = 32;
@@ -14,6 +14,7 @@ module top_module_tb;
 
     localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
     localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD;
+    localparam int unsigned B_NUM_WORDS_PER_ROW    = (NUM_MACS * DATA_WIDTH) / STREAM_WORD_BIT;
 
     // --- Testbench Signals ---
     logic clk_i;
@@ -91,48 +92,88 @@ module top_module_tb;
 
     // --- Data Loading Task ---
     task load_buffers();
+        // Array di supporto per memorizzare e stampare la matrice B
+        logic [STREAM_WORD_BIT-1:0] b_matrix_shadow [NUM_ROWS][B_NUM_WORDS_PER_ROW];
         begin
             $display("[TB] Starting data loading into SCM Buffers...");
 
-            // 1. Loading ROW POINTERS
-            // PtrStart/End for the 4 rows: [0, 2, 2, 6, 8]
+           // 1. Loading ROW POINTERS (17 pointers for 16 rows: [0, 2, 2, 6, 8, 10, 11, 12, 15, 16, 18, 18, 20, 23, 24, 26, 28])
             row_ptr_write_en_i        = 1'b1;
-            row_ptr_write_word_addr_i = '0;
-            // Byte0=0 (Start Row0), Byte1=2 (Start Row1), Byte2=2 (Start Row2), Byte3=6 (Start Row3)
+            
+            // Word 0: R0..R3 -> [0, 2, 2, 6]
+            row_ptr_write_word_addr_i = 'd0;
             row_ptr_wdata_i           = {8'd6, 8'd2, 8'd2, 8'd0}; #10;
+            
+            // Word 1: R4..R7 -> [12, 11, 10, 8]
             row_ptr_write_word_addr_i = 'd1;
-            // Byte0=8 (End Row3)
-            row_ptr_wdata_i           = {24'd0, 8'd8}; #10;
+            row_ptr_wdata_i           = {8'd12, 8'd11, 8'd10, 8'd8}; #10;
+            
+            // Word 2: R8..R11 -> [18, 18, 16, 15]
+            row_ptr_write_word_addr_i = 'd2;
+            row_ptr_wdata_i           = {8'd18, 8'd18, 8'd16, 8'd15}; #10;
+
+            // Word 3: R12..R15 -> [26, 24, 23, 20]
+            row_ptr_write_word_addr_i = 'd3;
+            row_ptr_wdata_i           = {8'd26, 8'd24, 8'd23, 8'd20}; #10;
+
+            // Word 4: Final Ptr -> [28]
+            row_ptr_write_word_addr_i = 'd4;
+            row_ptr_wdata_i           = {24'd0, 8'd28}; #10;
+            
             row_ptr_write_en_i        = 1'b0;
 
-            // 2. Loading DENSE MATRIX B (4x4)
-            // B = [[1, 2, 3, 4],
-            //      [5, 6, 7, 8],
-            //      [2, 1, 2, 3],
-            //      [4, 1, 2, 5]]
-            b_write_en_i        = 1'b1;
-            b_write_word_addr_i = '0;
+            // 2. Loading DENSE MATRIX B (16x16) - Generazione Randomica e Scrittura Buffer
+            b_write_en_i = 1'b1;
+            for (int r = 0; r < NUM_ROWS; r++) begin
+                b_write_row_addr_i = r[$clog2(NUM_ROWS)-1:0];
+                for (int w = 0; w < B_NUM_WORDS_PER_ROW; w++) begin
+                    b_write_word_addr_i = w[$clog2(B_NUM_WORDS_PER_ROW)-1:0];
+                    b_wdata_i           = $urandom(); // Genera un valore casuale a 32 bit
+                    b_matrix_shadow[r][w] = b_wdata_i; // Salvataggio per la stampa
+                    #10;
+                end
+            end
+            b_write_en_i = 1'b0;
 
-            b_write_row_addr_i  = 2'd0; b_wdata_i = {8'd4, 8'd3, 8'd2, 8'd1}; #10; // Row 0
-            b_write_row_addr_i  = 2'd1; b_wdata_i = {8'd8, 8'd7, 8'd6, 8'd5}; #10; // Row 1
-            b_write_row_addr_i  = 2'd2; b_wdata_i = {8'd3, 8'd2, 8'd1, 8'd2}; #10; // Row 2
-            b_write_row_addr_i  = 2'd3; b_wdata_i = {8'd5, 8'd2, 8'd1, 8'd4}; #10; // Row 3
-            b_write_en_i        = 1'b0;
+            // Stampa a video della Matrice B 16x16 in formato decimale
+            $display("==================================================");
+            $display("       RANDOM MATRIX B GENERATED (16x16)          ");
+            $display("==================================================");
+            for (int r = 0; r < NUM_ROWS; r++) begin
+                $write("Row %2d -> [", r);
+                for (int w = 0; w < B_NUM_WORDS_PER_ROW; w++) begin
+                    // Estrae i 4 elementi da 8 bit all'interno di ciascuna parola da 32 bit
+                    $write("%3d %3d %3d %3d", 
+                           b_matrix_shadow[r][w][7:0], 
+                           b_matrix_shadow[r][w][15:8], 
+                           b_matrix_shadow[r][w][23:16], 
+                           b_matrix_shadow[r][w][31:24]);
+                    if (w < B_NUM_WORDS_PER_ROW - 1) $write(" | ");
+                end
+                $display("]");
+            end
+            $display("==================================================\n");
 
-            // 3. Loading NON-ZERO VALUES FOR MATRIX A (8 total elements)
-            // Word 0 (NNZ 0..3): Row0(3, 5), Row2(4, 1)
-            // Word 1 (NNZ 4..7): Row2(7, 2), Row3(6, 8)
+            // 3. Loading NON-ZERO VALUES FOR MATRIX A (28 total elements)
             a_write_en_i        = 1'b1;
             a_write_word_addr_i = '0; a_wdata_i = {8'd1, 8'd4, 8'd5, 8'd3}; #10;
             a_write_word_addr_i = 'd1; a_wdata_i = {8'd8, 8'd6, 8'd2, 8'd7}; #10;
+            a_write_word_addr_i = 'd2; a_wdata_i = {8'd10, 8'd5, 8'd2, 8'd1}; #10;
+            a_write_word_addr_i = 'd3; a_wdata_i = {8'd1, 8'd2, 8'd3, 8'd2}; #10;
+            a_write_word_addr_i = 'd4; a_wdata_i = {8'd20, 8'd10, 8'd3, 8'd3}; #10;
+            a_write_word_addr_i = 'd5; a_wdata_i = {8'd5, 8'd1, 8'd2, 8'd1}; #10;
+            a_write_word_addr_i = 'd6; a_wdata_i = {8'd4, 8'd4, 8'd2, 8'd2}; #10;
             a_write_en_i        = 1'b0;
 
             // 4. Loading COLID FOR MATRIX A
-            // Word 0 (NNZ 0..3): Row0(col 0, col 2), Row2(col 0, col 1)
-            // Word 1 (NNZ 4..7): Row2(col 2, col 3), Row3(col 2, col 3)
             col_id_write_en_i        = 1'b1;
             col_id_write_word_addr_i = '0; col_id_wdata_i = {8'd1, 8'd0, 8'd2, 8'd0}; #10;
-            col_id_write_word_addr_i = 'd1; col_id_wdata_i = {8'd3, 8'd2, 8'd3, 8'd2}; #10;
+            col_id_write_word_addr_i = 'd1; col_id_wdata_i = {8'd4, 8'd5, 8'd3, 8'd2}; #10;
+            col_id_write_word_addr_i = 'd2; col_id_wdata_i = {8'd4, 8'd4, 8'd7, 8'd6}; #10;
+            col_id_write_word_addr_i = 'd3; col_id_wdata_i = {8'd10, 8'd6, 8'd5, 8'd7}; #10;
+            col_id_write_word_addr_i = 'd4; col_id_wdata_i = {8'd12, 8'd13, 8'd15, 8'd11}; #10;
+            col_id_write_word_addr_i = 'd5; col_id_wdata_i = {8'd7, 8'd14, 8'd9, 8'd8}; #10;
+            col_id_write_word_addr_i = 'd6; col_id_wdata_i = {8'd6, 8'd3, 8'd1, 8'd10}; #10;
             col_id_write_en_i        = 1'b0;
 
             $display("[TB] Data loading completed.\n");
@@ -178,17 +219,18 @@ module top_module_tb;
         $display("==================================================");
         
         for (int r = 0; r < NUM_ROWS; r++) begin
-            logic [31:0] val0, val1, val2, val3;
+            logic [31:0] val [16];
             
             c_read_row_addr_i = r;
             
-            c_read_word_addr_i = 0; #10; val0 = c_rdata_o;
-            c_read_word_addr_i = 1; #10; val1 = c_rdata_o;
-            c_read_word_addr_i = 2; #10; val2 = c_rdata_o;
-            c_read_word_addr_i = 3; #10; val3 = c_rdata_o;
+            for (int c = 0; c < 16; c++) begin
+                c_read_word_addr_i = c; #10;
+                val[c] = c_rdata_o;
+            end
 
-            $display("Row %0d -> [Col0: %3d | Col1: %3d | Col2: %3d | Col3: %3d]", 
-                     r, val0, val1, val2, val3);
+            $display("Row %2d -> [%3d %3d %3d %3d | %3d %3d %3d %3d | %3d %3d %3d %3d | %3d %3d %3d %3d]", 
+                     r, val[0], val[1], val[2], val[3], val[4], val[5], val[6], val[7], 
+                        val[8], val[9], val[10], val[11], val[12], val[13], val[14], val[15]);
         end
         $display("==================================================\n");
 

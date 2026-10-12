@@ -8,8 +8,8 @@
 
 module top_module #(
     parameter int unsigned DATA_WIDTH      = 8,           // INT8 data width
-    parameter int unsigned NUM_MACS        = 4,           // Parallel MAC units (columns of B/C)
-    parameter int unsigned NUM_ROWS        = 4,           // Number of rows in matrix B / output C
+    parameter int unsigned NUM_MACS        = 8,           // Parallel MAC units (columns of B/C)
+    parameter int unsigned NUM_ROWS        = 8,           // Number of rows in matrix B / output C
     parameter int unsigned TOTAL_NNZ       = 64,          // Max total storable non-zero elements
     parameter int unsigned TOTAL_PTRS      = 65,          // Total row pointers (NUM_ROWS + 1)
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
