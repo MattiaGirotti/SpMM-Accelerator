@@ -35,8 +35,12 @@ module datapath #(
     logic [7:0] row_count;
     logic [7:0] current_nnz;
 
+    logic unsigned [DATA_WIDTH-1:0]                data_a_q;
+    logic unsigned [NUM_MACS-1:0][DATA_WIDTH-1:0]   data_b_q;
+
     logic in_hs;
     logic out_hs;
+    logic mac_en;
     logic sync_clear;
     logic empty_row;
     logic row_done;
@@ -46,6 +50,21 @@ module datapath #(
     assign out_hs = out_valid_o && out_ready_i;
 
     assign in_ready_o = !out_valid_o || out_hs;
+    assign mac_en     = in_hs && (nnz_iterations_i > 0);
+
+    // --- Sampling Data Input on Handshake ---
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (!rst_ni) begin
+            data_a_q <= '0;
+            data_b_q <= '0;
+        end else if (clear_i) begin
+            data_a_q <= '0;
+            data_b_q <= '0;
+        end else if (in_hs) begin
+            data_a_q <= data_a_i;
+            data_b_q <= data_b_i;
+        end
+    end
 
     // --- Row Completion Logic ---
     assign sync_clear = (iteration_count == current_nnz) && (current_nnz > 0);

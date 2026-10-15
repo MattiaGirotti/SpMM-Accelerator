@@ -11,7 +11,7 @@ module a_buffer #(
 
     // --- Write Interface (from HWPE Streamer) --- 
     input  logic                                                write_en_i,          // Block write enable 
-    input  logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] write_word_addr_i, // Address of the block to write 
+    //input  logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] write_word_addr_i, // Address of the block to write 
     input  logic [STREAM_WORD_BIT-1:0]                          wdata_i,             // Block data bus from the Streamer (e.g., 32-bit) 
 
     // --- Read Interface (to Datapath - 1 element at a time) --- 
@@ -25,6 +25,9 @@ module a_buffer #(
     // Linear/block-structured SCM memory matrix for NNZ values 
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;
 
+    // Address of the block to write
+    logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] write_word_addr_q;
+
     // Translation of the global read address into internal coordinates [word][element] 
     logic [$clog2(NUM_WORDS)-1:0]      r_word_idx;
     logic [$clog2(ELEMS_PER_WORD)-1:0] r_elem_idx;
@@ -33,6 +36,20 @@ module a_buffer #(
     assign r_elem_idx = read_addr_i % ELEMS_PER_WORD;
  
     assign rdata_a_o = mem_q[r_word_idx][r_elem_idx];
+
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (~rst_ni) begin
+            write_word_addr_q <= '0;
+        end else if (clear_i) begin
+            write_word_addr_q <= '0;
+        end else if (write_en_i) begin
+            if (write_word_addr_q == NUM_WORDS - 1) begin
+                write_word_addr_q <= '0; // Reset circolare a fine transazione (o gestione equivalente)
+            end else begin
+                write_word_addr_q <= write_word_addr_q + 1'b1;
+            end
+        end
+    end
 
     if (USE_LATCHES) begin : gen_latches
         // Implementation based on Latch + Clock Gating for area saving (RedMulE style) 
@@ -67,7 +84,7 @@ module a_buffer #(
                 mem_q <= '0;
             end else if (write_en_i) begin
                 for (int e = 0; e < ELEMS_PER_WORD; e++) begin
-                    mem_q[write_word_addr_i][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
+                    mem_q[write_word_addr_q][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
                 end
             end
         end

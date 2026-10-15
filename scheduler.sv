@@ -16,7 +16,6 @@ module scheduler #(
 
     // --- Control Interface ---
     input  logic                                                start_i,
-    output logic                                                busy_o,
     output logic                                                done_o,
 
     // --- Interface to row_ptr_buffer ---
@@ -120,7 +119,6 @@ module scheduler #(
         global_nnz_ptr_d    = global_nnz_ptr_q;
         b_row_addr_d        = b_row_addr_q;
 
-        busy_o              = 1'b1;
         done_o              = 1'b0;
 
         row_ptr_read_addr_o = row_idx_q;
@@ -139,7 +137,6 @@ module scheduler #(
         case (current_state)
 
             IDLE: begin
-                busy_o = 1'b0;
                 if (start_i) begin
                     row_idx_d        = '0;
                     global_nnz_ptr_d = '0;
@@ -196,7 +193,6 @@ module scheduler #(
             CHECK_DONE: begin
                 if (row_idx_q == NUM_ROWS - 1) begin
                     done_o     = 1'b1;
-                    busy_o     = 1'b0;
                     next_state = IDLE;
                 end else begin
                     row_idx_d  = row_idx_q + 1'b1;
