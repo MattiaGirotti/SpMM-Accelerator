@@ -11,7 +11,6 @@ module colID_buffer #(
 
     // --- Write Interface (from HWPE Streamer) ---
     input  logic                                                write_en_i,          // Block write enable
-    input  logic [$clog2(TOTAL_ID/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] write_word_addr_i, // Address of the block to write
     input  logic [STREAM_WORD_BIT-1:0]                          wdata_i,             // Block data bus from Streamer (e.g., 32-bit)
 
     // --- Read Interface (to Datapath - 1 element at a time) ---
@@ -25,6 +24,8 @@ module colID_buffer #(
     // SCM memory matrix linear/block-structured for column IDs
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;
 
+    logic [$clog2(TOTAL_ID/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] write_word_addr_q;
+
     // Translation of global read address into internal coordinates [word][element]
     logic [$clog2(NUM_WORDS)-1:0]      r_word_idx;
     logic [$clog2(ELEMS_PER_WORD)-1:0] r_elem_idx;
@@ -34,6 +35,21 @@ module colID_buffer #(
 
     assign rdata_o = mem_q[r_word_idx][r_elem_idx];
 
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (~rst_ni) begin
+            write_word_addr_q <= '0;
+        end else if (clear_i) begin
+            write_word_addr_q <= '0;
+        end else if (write_en_i) begin
+            if (write_word_addr_q == NUM_WORDS - 1) begin
+                write_word_addr_q <= '0; // Reset circolare a fine transazione (o gestione equivalente)
+            end else begin
+                write_word_addr_q <= write_word_addr_q + 1'b1;
+            end
+        end
+    end
+
+
     if (USE_LATCHES) begin : gen_latches
         // Latch + Clock Gating implementation for area saving (RedMulE style)
         logic [NUM_WORDS-1:0] clk_w;
@@ -41,7 +57,7 @@ module colID_buffer #(
         for (genvar w = 0; w < NUM_WORDS; w++) begin : gen_words_cg
             tc_clk_gating i_cg (
                 .clk_i     (clk_i),
-                .en_i      ((write_en_i && (write_word_addr_i == w)) || clear_i),
+                .en_i      ((write_en_i && (write_word_addr_q == w)) || clear_i),
                 .test_en_i ('0),
                 .clk_o     (clk_w[w])
             );
@@ -67,7 +83,7 @@ module colID_buffer #(
                 mem_q <= '0;
             end else if (write_en_i) begin
                 for (int e = 0; e < ELEMS_PER_WORD; e++) begin
-                    mem_q[write_word_addr_i][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
+                    mem_q[write_word_addr_q][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
                 end
             end
         end

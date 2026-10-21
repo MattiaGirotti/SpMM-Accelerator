@@ -1,7 +1,7 @@
 // SCM Buffer Module for the Row Pointer Array (CSR SpMM)  
 module row_ptr_buffer #(
     parameter int unsigned DATA_WIDTH      = 8,
-    parameter int unsigned TOTAL_PTRS      = 65,
+    parameter int unsigned TOTAL_PTRS      = 17,
     parameter int unsigned STREAM_WORD_BIT = 32,
     parameter bit          USE_LATCHES     = 0,
     // Derived parameters added to size the ports  
@@ -14,7 +14,6 @@ module row_ptr_buffer #(
 
     // --- Write Interface ---  
     input  logic                               write_en_i,          
-    input  logic [$clog2(NUM_WORDS)-1:0]       write_word_addr_i,
     input  logic [STREAM_WORD_BIT-1:0]         wdata_i,             
 
     // --- Read Interface ---  
@@ -25,6 +24,8 @@ module row_ptr_buffer #(
 
     // Linear/block-structured SCM memory array  
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;
+
+    logic [$clog2(NUM_WORDS)-1:0]       write_word_addr_q;
 
     // Translation of row index to coordinates for the first element (row_ptr[i])  
     logic [$clog2(NUM_WORDS)-1:0]      r1_word_idx;
@@ -45,13 +46,30 @@ module row_ptr_buffer #(
     assign rdata_start_o = mem_q[r1_word_idx][r1_elem_idx];
     assign rdata_end_o   = mem_q[r2_word_idx][r2_elem_idx];
 
+always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (~rst_ni) begin
+            write_word_addr_q <= '0;
+        end else if (clear_i) begin
+            write_word_addr_q <= '0;
+        end else if (write_en_i) begin
+            // Incremento sicuro: se siamo all'ultima parola, al prossimo write riparte da 0,
+            // oppure lasciamo che il registro a dimensione fissa faccia overflow naturale.
+            if (write_word_addr_q >= NUM_WORDS - 1) begin
+                write_word_addr_q <= '0;
+            end else begin
+                write_word_addr_q <= write_word_addr_q + 1'b1;
+            end
+        end
+    end
+
+
     if (USE_LATCHES) begin : gen_latches
         logic [NUM_WORDS-1:0] clk_w;
 
         for (genvar w = 0; w < NUM_WORDS; w++) begin : gen_words_cg
             tc_clk_gating i_cg (
                 .clk_i     (clk_i),
-                .en_i      ((write_en_i && (write_word_addr_i == w)) || clear_i),
+                .en_i      ((write_en_i && (write_word_addr_q == w)) || clear_i),
                 .test_en_i ('0),
                 .clk_o     (clk_w[w])
             );
@@ -68,7 +86,7 @@ module row_ptr_buffer #(
                 end
             end
         end
-    end else begin : gen_flip_flops
+end else begin : gen_flip_flops
         always_ff @(posedge clk_i or negedge rst_ni) begin
             if (~rst_ni) begin
                 mem_q <= '0;
@@ -76,12 +94,11 @@ module row_ptr_buffer #(
                 mem_q <= '0;
             end else if (write_en_i) begin
                 for (int e = 0; e < ELEMS_PER_WORD; e++) begin
-                    if (write_word_addr_i * ELEMS_PER_WORD + e < TOTAL_PTRS) begin
-                        mem_q[write_word_addr_i][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
+                    if (write_word_addr_q * ELEMS_PER_WORD + e < TOTAL_PTRS) begin
+                        mem_q[write_word_addr_q][e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH];
                     end
                 end
             end
         end
     end
-
 endmodule

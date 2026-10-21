@@ -1,17 +1,16 @@
 // ============================================================================
-// Module: top_module
-// Description: Integrated CSR SpMM Accelerator.
-//              SCM Buffers (A, B, ColID, RowPtr, C) connected directly 
-//              to Datapath for data processing, controlled by Scheduler FSM.
-//              Fixed bit-width parameterization for row_ptr_write_word_addr_i.
+// Module: top_module (Integrated with spmm_streamer)
+// Description: CSR SpMM Accelerator wrapped with TCDM Streamer interface.
 // ============================================================================
+
+import hci_package::*;
 
 module top_module #(
     parameter int unsigned DATA_WIDTH      = 8,           // INT8 data width
-    parameter int unsigned NUM_MACS        = 8,           // Parallel MAC units (columns of B/C)
-    parameter int unsigned NUM_ROWS        = 8,           // Number of rows in matrix B / output C
-    parameter int unsigned TOTAL_NNZ       = 64,          // Max total storable non-zero elements
-    parameter int unsigned TOTAL_PTRS      = 65,          // Total row pointers (NUM_ROWS + 1)
+    parameter int unsigned NUM_MACS        = 16,          // Parallel MAC units
+    parameter int unsigned NUM_ROWS        = 16,          // Number of rows
+    parameter int unsigned TOTAL_NNZ       = 64,          // Max total non-zero elements
+    parameter int unsigned TOTAL_PTRS      = 65,          // Total row pointers
     parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
     parameter int unsigned DATA_WIDTH_OUT  = 32,          // INT32 output precision
     parameter bit          USE_LATCHES     = 0           // 1: Clock Gating + Latches, 0: Flip-Flops
@@ -20,71 +19,75 @@ module top_module #(
     input  logic                                                rst_ni,
     input  logic                                                clear_i,
 
-    // --- Control / Status Interface ---
+    // --- Control & Status Interface ---
     input  logic                                                start_i,
-    output logic                                                busy_o,
+    //output logic                                                busy_o,
     output logic                                                done_o,
 
-    // --- External Write Interface from HWPE Streamer ---
-    // a_buffer write port
-    input  logic                                                a_write_en_i,
-    input  logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] a_write_word_addr_i,
-    input  logic [STREAM_WORD_BIT-1:0]                          a_wdata_i,
+    // --- TCDM Master Interface (To Memory Subsystem) ---
+    hci_core_intf.initiator                                     tcdm_master,
 
-    // b_buffer write port
-    input  logic                                                b_write_en_i,
-    input  logic [$clog2(NUM_ROWS)-1:0]                         b_write_row_addr_i,
-    input  logic [$clog2((NUM_MACS*DATA_WIDTH)/STREAM_WORD_BIT)-1:0] b_write_word_addr_i,
-    input  logic [STREAM_WORD_BIT-1:0]                          b_wdata_i,
+    // --- Configuration Registers (Base Addresses & Lengths) ---
+    input  logic [31:0]                                         row_ptr_base_addr_i,
+    input  logic [31:0]                                         b_base_addr_i,
+    input  logic [31:0]                                         a_base_addr_i,
+    input  logic [31:0]                                         col_id_base_addr_i,
+    input  logic [31:0]                                         c_base_addr_i,
 
-    // colID_buffer write port
-    input  logic                                                col_id_write_en_i,
-    input  logic [$clog2(TOTAL_NNZ/(STREAM_WORD_BIT/DATA_WIDTH))-1:0] col_id_write_word_addr_i,
-    input  logic [STREAM_WORD_BIT-1:0]                          col_id_wdata_i,
-
-    // row_ptr_buffer write port (Fixed: Localparam derivation for clean bit-width sizing)
-    input  logic                                                row_ptr_write_en_i,
-    input  logic [$clog2(ROW_PTR_NUM_WORDS)-1:0]               row_ptr_write_word_addr_i,
-    input  logic [STREAM_WORD_BIT-1:0]                          row_ptr_wdata_i,
-
-    // --- Read Interface to HWPE Streamer for Output Matrix C ---
-    input  logic [$clog2(NUM_ROWS)-1:0]                         c_read_row_addr_i,
-    input  logic [$clog2((NUM_MACS*DATA_WIDTH_OUT)/STREAM_WORD_BIT)-1:0] c_read_word_addr_i,
-    output logic [STREAM_WORD_BIT-1:0]                          c_rdata_o
+    input  logic [15:0]                                         row_ptr_num_words_i,
+    input  logic [15:0]                                         b_num_words_i,
+    input  logic [15:0]                                         a_num_words_i,
+    input  logic [15:0]                                         col_id_num_words_i
 );
 
     // -------------------------------------------------------------------------
-    // Local Parameters for Sub-module Port Alignment
+    // Local Parameters & Internal Interconnect Signals
     // -------------------------------------------------------------------------
     localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
     localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD;
+    localparam int unsigned WORDS_PER_C_ROW        = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT;
 
-    // -------------------------------------------------------------------------
-    // Internal Interconnect Signals
-    // -------------------------------------------------------------------------
+    // Streamer <-> Buffers Write Interconnect
+    logic                                               a_write_en;
+    logic [STREAM_WORD_BIT-1:0]                         a_wdata;
+    logic                                               b_write_en;
+    logic [STREAM_WORD_BIT-1:0]                         b_wdata;
+    logic                                               col_id_write_en;
+    logic [STREAM_WORD_BIT-1:0]                         col_id_wdata;
+    logic                                               row_ptr_write_en;
+    logic [STREAM_WORD_BIT-1:0]                         row_ptr_wdata;
+
+    // Streamer <-> C Buffer Read Interconnect
+    logic [$clog2(NUM_ROWS)-1:0]                        c_read_row_addr;
+    logic [$clog2(WORDS_PER_C_ROW)-1:0]                 c_read_word_addr;
+    logic [STREAM_WORD_BIT-1:0]                         c_rdata;
+
+    // Streamer <-> Scheduler FSM Handshake
+    logic                                               accel_start;
+    logic                                               accel_done;
 
     // row_ptr_buffer <-> scheduler
-    logic [$clog2(TOTAL_PTRS-1)-1:0]                   row_ptr_read_addr;
-    logic [DATA_WIDTH-1:0]                                        row_ptr_start;
-    logic [DATA_WIDTH-1:0]                                        row_ptr_end;
+    logic [$clog2(TOTAL_PTRS-1)-1:0]                    row_ptr_read_addr;
+    logic [DATA_WIDTH-1:0]                              row_ptr_start;
+    logic [DATA_WIDTH-1:0]                              row_ptr_end;
 
     // colID_buffer <-> scheduler
-    logic [$clog2(TOTAL_NNZ)-1:0]                      col_id_read_addr;
+    logic [$clog2(TOTAL_NNZ)-1:0]                       col_id_read_addr;
     logic [DATA_WIDTH-1:0]                              col_id_data;
 
-    // a_buffer <-> scheduler (addr) / datapath (data)
-    logic [$clog2(TOTAL_NNZ)-1:0]                      a_read_addr;
+    // a_buffer <-> scheduler / datapath
+    logic [$clog2(TOTAL_NNZ)-1:0]                       a_read_addr;
     logic unsigned [DATA_WIDTH-1:0]                       a_data;
 
-    // b_buffer <-> scheduler (addr) / datapath (data)
+    // b_buffer <-> scheduler / datapath
     logic [$clog2(NUM_ROWS)-1:0]                        b_read_row_addr;
     logic unsigned [NUM_MACS-1:0][DATA_WIDTH-1:0]         b_data;
 
-    // c_buffer <-> scheduler (ctrl) / datapath (data)
+    // c_buffer <-> scheduler / datapath
     logic                                               c_buf_write_en;
     logic [$clog2(NUM_ROWS)-1:0]                        c_buf_write_row_addr;
 
-    // scheduler <-> datapath (Handshake & Control Channel)
+    // scheduler <-> datapath
     logic                                               dp_in_valid;
     logic                                               dp_in_ready;
     logic [DATA_WIDTH-1:0]                              dp_nnz_iterations;
@@ -94,9 +97,51 @@ module top_module #(
     logic                                               dp_matrix_end;
 
     // -------------------------------------------------------------------------
-    // SCM Input Buffer Instantiations
+    // 1. Instantiation of SpMM Streamer
     // -------------------------------------------------------------------------
+    streamer #(
+        .DATA_WIDTH      (DATA_WIDTH),
+        .NUM_MACS        (NUM_MACS),
+        .NUM_ROWS        (NUM_ROWS),
+        .TOTAL_NNZ       (TOTAL_NNZ),
+        .TOTAL_PTRS      (TOTAL_PTRS),
+        .STREAM_WORD_BIT (STREAM_WORD_BIT),
+        .DATA_WIDTH_OUT  (DATA_WIDTH_OUT)
+    ) i_spmm_streamer (
+        .clk_i                (clk_i),
+        .rst_ni               (rst_ni),
+        .clear_i              (clear_i),
+        .start_i              (start_i),
+        .busy_o               (busy_o),
+        .done_o               (done_o),
+        .a_base_addr_i        (a_base_addr_i),
+        .col_id_base_addr_i   (col_id_base_addr_i),
+        .row_ptr_base_addr_i  (row_ptr_base_addr_i),
+        .b_base_addr_i        (b_base_addr_i),
+        .c_base_addr_i        (c_base_addr_i),
+        .a_num_words_i        (a_num_words_i),
+        .col_id_num_words_i   (col_id_num_words_i),
+        .row_ptr_num_words_i  (row_ptr_num_words_i),
+        .b_num_words_i        (b_num_words_i),
+        .tcdm_master          (tcdm_master),
+        .a_write_en_o         (a_write_en),
+        .a_wdata_o            (a_wdata),
+        .b_write_en_o         (b_write_en),
+        .b_wdata_o            (b_wdata),
+        .col_id_write_en_o    (col_id_write_en),
+        .col_id_wdata_o       (col_id_wdata),
+        .row_ptr_write_en_o   (row_ptr_write_en),
+        .row_ptr_wdata_o      (row_ptr_wdata),
+        .c_read_row_addr_o    (c_read_row_addr),
+        .c_read_word_addr_o   (c_read_word_addr),
+        .c_rdata_i            (c_rdata),
+        .accel_start_o        (accel_start),
+        .accel_done_i         (accel_done)
+    );
 
+    // -------------------------------------------------------------------------
+    // 2. Instantiation of SCM Input Buffers (con indirizzamento interno)
+    // -------------------------------------------------------------------------
     a_buffer #(
         .DATA_WIDTH      (DATA_WIDTH),
         .TOTAL_NNZ       (TOTAL_NNZ),
@@ -106,9 +151,8 @@ module top_module #(
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
         .clear_i           (clear_i),
-        .write_en_i        (a_write_en_i),
-        .write_word_addr_i (a_write_word_addr_i),
-        .wdata_i           (a_wdata_i),
+        .write_en_i        (a_write_en),
+        .wdata_i           (a_wdata),
         .read_addr_i       (a_read_addr),
         .rdata_a_o         (a_data)
     );
@@ -123,10 +167,8 @@ module top_module #(
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
         .clear_i           (clear_i),
-        .write_en_i        (b_write_en_i),
-        .write_row_addr_i  (b_write_row_addr_i),
-        .write_word_addr_i (b_write_word_addr_i),
-        .wdata_i           (b_wdata_i),
+        .write_en_i        (b_write_en),
+        .wdata_i           (b_wdata),
         .read_row_addr_i   (b_read_row_addr),
         .rdata_b_o         (b_data)
     );
@@ -140,9 +182,8 @@ module top_module #(
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
         .clear_i           (clear_i),
-        .write_en_i        (col_id_write_en_i),
-        .write_word_addr_i (col_id_write_word_addr_i),
-        .wdata_i           (col_id_wdata_i),
+        .write_en_i        (col_id_write_en),
+        .wdata_i           (col_id_wdata),
         .read_addr_i       (col_id_read_addr),
         .rdata_o           (col_id_data)
     );
@@ -156,18 +197,16 @@ module top_module #(
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
         .clear_i           (clear_i),
-        .write_en_i        (row_ptr_write_en_i),
-        .write_word_addr_i (row_ptr_write_word_addr_i),
-        .wdata_i           (row_ptr_wdata_i),
+        .write_en_i        (row_ptr_write_en),
+        .wdata_i           (row_ptr_wdata),
         .read_row_idx_i    (row_ptr_read_addr),
         .rdata_start_o     (row_ptr_start),
         .rdata_end_o       (row_ptr_end)
     );
 
     // -------------------------------------------------------------------------
-    // SCM Output Buffer Instantiation (C Buffer)
+    // 3. Instantiation of SCM Output Buffer (C Buffer)
     // -------------------------------------------------------------------------
-
     c_buffer #(
         .DATA_WIDTH_OUT  (DATA_WIDTH_OUT),
         .NUM_MACS        (NUM_MACS),
@@ -181,15 +220,14 @@ module top_module #(
         .write_en_i        (c_buf_write_en),
         .write_row_addr_i  (c_buf_write_row_addr),
         .wdata_i           (dp_data_out),
-        .read_row_addr_i   (c_read_row_addr_i),
-        .read_word_addr_i  (c_read_word_addr_i),
-        .rdata_c_o         (c_rdata_o)
+        .read_row_addr_i   (c_read_row_addr),
+        .read_word_addr_i  (c_read_word_addr),
+        .rdata_c_o         (c_rdata)
     );
 
     // -------------------------------------------------------------------------
-    // Scheduler Instantiation (Pure Control & Addressing FSM)
+    // 4. Instantiation of Scheduler FSM
     // -------------------------------------------------------------------------
-
     scheduler #(
         .DATA_WIDTH      (DATA_WIDTH),
         .NUM_MACS        (NUM_MACS),
@@ -201,9 +239,8 @@ module top_module #(
         .clk_i                 (clk_i),
         .rst_ni                (rst_ni),
         .clear_i               (clear_i),
-        .start_i               (start_i),
-        .busy_o                (busy_o),
-        .done_o                (done_o),
+        .start_i               (accel_start), // Guidato dallo streamer anziché dal pin esterno
+        .done_o                (accel_done),  // Collegato allo streamer per notificare la fine
         .row_ptr_read_addr_o   (row_ptr_read_addr),
         .row_ptr_start_i       (row_ptr_start),
         .row_ptr_end_i         (row_ptr_end),
@@ -222,9 +259,8 @@ module top_module #(
     );
 
     // -------------------------------------------------------------------------
-    // Datapath Instantiation (Direct Processing Datapath)
+    // 5. Instantiation of Datapath
     // -------------------------------------------------------------------------
-
     datapath #(
         .DATA_WIDTH     (DATA_WIDTH),
         .NUM_MACS       (NUM_MACS),

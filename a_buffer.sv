@@ -58,7 +58,7 @@ module a_buffer #(
         for (genvar w = 0; w < NUM_WORDS; w++) begin : gen_words_cg
             tc_clk_gating i_cg (
                 .clk_i     (clk_i),
-                .en_i      ((write_en_i && (write_word_addr_i == w)) || clear_i),
+                .en_i      ((write_en_i && (write_word_addr_q == w)) || clear_i),
                 .test_en_i ('0),
                 .clk_o     (clk_w[w])
             );

@@ -16,6 +16,7 @@ module scheduler #(
 
     // --- Control Interface ---
     input  logic                                                start_i,
+    output logic                                                busy_o,
     output logic                                                done_o,
 
     // --- Interface to row_ptr_buffer ---
@@ -52,9 +53,7 @@ module scheduler #(
         IDLE,
         FETCH_ROW_PTR,
         WAIT_ROW_PTR,
-        CALC_NNZ,
-        ADDR_COL_A,
-        FETCH_B,
+        WAIT_MEM,
         PROCESS_NNZ,
         WAIT_DP_OUT,
         STORE_C,
@@ -119,13 +118,14 @@ module scheduler #(
         global_nnz_ptr_d    = global_nnz_ptr_q;
         b_row_addr_d        = b_row_addr_q;
 
+        busy_o              = 1'b1;
         done_o              = 1'b0;
 
         row_ptr_read_addr_o = row_idx_q;
         
-        col_id_read_addr_o = global_nnz_ptr_q + nnz_count_q;
-        a_read_addr_o      = global_nnz_ptr_q + nnz_count_q;
-        b_read_row_addr_o  = col_id_i[$clog2(NUM_ROWS)-1:0];
+        col_id_read_addr_o  = global_nnz_ptr_q + nnz_count_q;
+        a_read_addr_o       = global_nnz_ptr_q + nnz_count_q;
+        b_read_row_addr_o   = col_id_i[$clog2(NUM_ROWS)-1:0];
 
         c_write_en_o        = 1'b0;
         c_write_row_addr_o  = row_idx_q;
@@ -137,6 +137,7 @@ module scheduler #(
         case (current_state)
 
             IDLE: begin
+                busy_o = 1'b0;
                 if (start_i) begin
                     row_idx_d        = '0;
                     global_nnz_ptr_d = '0;
@@ -144,15 +145,28 @@ module scheduler #(
                 end
             end
 
+            // 1. Richiede la lettura del puntatore per la riga corrente
             FETCH_ROW_PTR: begin
                 row_ptr_read_addr_o = row_idx_q;
-                next_state = CALC_NNZ;
+                next_state          = WAIT_ROW_PTR;
             end
 
-            CALC_NNZ: begin
-                row_ptr_read_addr_o = row_idx_q;
+            // 2. Attende un ciclo per campionare correttamente start ed end dalla memoria
+           WAIT_ROW_PTR: begin
                 nnz_total_d         = row_ptr_end_i - row_ptr_start_i;
+                global_nnz_ptr_d    = row_ptr_start_i;
                 nnz_count_d         = '0;
+                
+                if ((row_ptr_end_i - row_ptr_start_i) == 8'd0) begin
+                    next_state = PROCESS_NNZ; // Riga vuota
+                end else begin
+                    next_state = WAIT_MEM;    // Avvia l'attesa del primo accesso memoria
+                end
+            end
+
+            WAIT_MEM: begin
+                // Questo stato dura esattamente 1 ciclo per dare tempo 
+                // alla memoria sincrona di A e ColID di restituire il dato valido
                 next_state = PROCESS_NNZ;
             end
 
@@ -163,15 +177,14 @@ module scheduler #(
                         next_state = WAIT_DP_OUT;
                     end
                 end else begin
-                    dp_in_valid_o = 1'b1; // Now both data_a and data_b are stable at the datapath inputs
+                    dp_in_valid_o = 1'b1; // I dati di A e ColID ora sono stabili
 
                     if (dp_in_hs) begin
                         if (nnz_count_q == nnz_total_q - 8'd1) begin
-                            global_nnz_ptr_d = global_nnz_ptr_q + nnz_total_q;
-                            next_state       = WAIT_DP_OUT;
+                            next_state = WAIT_DP_OUT;
                         end else begin
-                            nnz_count_d = nnz_count_q + 8'd1;
-                            next_state = PROCESS_NNZ;
+                            nnz_count_d = nnz_count_q + 1'b1;
+                            next_state  = WAIT_MEM; // Torna a WAIT_MEM per il prossimo NNZ della riga
                         end
                     end
                 end
@@ -193,6 +206,7 @@ module scheduler #(
             CHECK_DONE: begin
                 if (row_idx_q == NUM_ROWS - 1) begin
                     done_o     = 1'b1;
+                    busy_o     = 1'b0;
                     next_state = IDLE;
                 end else begin
                     row_idx_d  = row_idx_q + 1'b1;

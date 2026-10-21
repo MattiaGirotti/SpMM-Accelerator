@@ -12,8 +12,6 @@ module b_buffer #(
 
     // --- Write Interface (from HWPE Streamer) --- 
     input  logic                                                write_en_i,        // Write enable signal 
-    input  logic [$clog2(NUM_B_ROWS)-1:0]                       write_row_addr_i,  // Address of the B row to write 
-    input  logic [$clog2((NUM_MACS*DATA_WIDTH)/STREAM_WORD_BIT)-1:0] write_word_addr_i, // Address of the word to write inside the B row 
     input  logic [STREAM_WORD_BIT-1:0]                          wdata_i,           // Write data bus (from Streamer) 
 
     // --- Read Interface (to Datapath MAC Array) --- 
@@ -24,10 +22,36 @@ module b_buffer #(
     localparam int unsigned WORDS_PER_ROW = (NUM_MACS * DATA_WIDTH) / STREAM_WORD_BIT; 
     localparam int unsigned ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH; 
 
+    // Internal address registers for automatic sequence generation
+    logic [$clog2(NUM_B_ROWS)-1:0]               write_row_addr_q;
+    logic [$clog2(WORDS_PER_ROW)-1:0]          write_word_addr_q;
+
     // SCM Memory Matrix 
     logic [NUM_B_ROWS-1:0][NUM_MACS-1:0][DATA_WIDTH-1:0] mem_q; 
 
     assign rdata_b_o = mem_q[read_row_addr_i];
+ 
+    // --- Internal Address Generation Logic ---
+    always_ff @(posedge clk_i or negedge rst_ni) begin
+        if (~rst_ni) begin
+            write_row_addr_q  <= '0;
+            write_word_addr_q <= '0;
+        end else if (clear_i) begin
+            write_row_addr_q  <= '0;
+            write_word_addr_q <= '0;
+        end else if (write_en_i) begin
+            if (write_word_addr_q == WORDS_PER_ROW - 1) begin
+                write_word_addr_q <= '0;
+                if (write_row_addr_q == NUM_B_ROWS - 1) begin
+                    write_row_addr_q <= '0; // Reset circolare a fine transazione
+                end else begin
+                    write_row_addr_q <= write_row_addr_q + 1'b1;
+                end
+            end else begin
+                write_word_addr_q <= write_word_addr_q + 1'b1;
+            end
+        end
+    end
 
     if (USE_LATCHES) begin : gen_latches 
         // Latch + Clock Gating implementation for area saving (PULP) 
@@ -37,7 +61,7 @@ module b_buffer #(
             for (genvar w = 0; w < WORDS_PER_ROW; w++) begin : gen_words_cg 
                 tc_clk_gating i_cg ( 
                     .clk_i     (clk_i), 
-                    .en_i      ((write_en_i && (write_row_addr_i == r) && (write_word_addr_i == w)) || clear_i), 
+                    .en_i      ((write_en_i && (write_row_addr_q == r) && (write_word_addr_q == w)) || clear_i), 
                     .test_en_i ('0), 
                     .clk_o     (clk_w[r][w]) 
                 );
@@ -66,7 +90,7 @@ module b_buffer #(
                 mem_q <= '0; 
             end else if (write_en_i) begin 
                 for (int e = 0; e < ELEMS_PER_WORD; e++) begin 
-                    mem_q[write_row_addr_i][write_word_addr_i * ELEMS_PER_WORD + e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH]; 
+                    mem_q[write_row_addr_q][write_word_addr_q * ELEMS_PER_WORD + e] <= wdata_i[e*DATA_WIDTH +: DATA_WIDTH]; 
                 end
             end
         end
