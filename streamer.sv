@@ -170,15 +170,16 @@ module streamer #(
                     tcdm_master.wen = 1'b1;
                     if (tcdm_master.gnt) begin
                         req_cnt_d      = req_cnt_q + 1'b1;
-                        current_addr_d = current_addr_q + 32'd16; // Incremento di 16 byte (128-bit)
+                        current_addr_d = current_addr_q + 32'd16; // Incremento indirizzo di memoria di 16 byte (128-bit)
                     end
                 end
 
                 if (tcdm_master.r_valid) begin
-                    row_ptr_write_en_o = 1'b1;
+                    row_ptr_write_en_o = 1'b1; //all'arrivo di una risposta valida attivo il segnale di enable di scrittura del buffer
                     resp_cnt_d         = resp_cnt_q + 1'b1;
                 end
 
+                //ultima word ricevuta
                 if (resp_cnt_q == row_ptr_num_words_i - 1 && tcdm_master.r_valid) begin
                     req_cnt_d      = '0;
                     resp_cnt_d     = '0;

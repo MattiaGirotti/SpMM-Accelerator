@@ -16,7 +16,7 @@ module scheduler #(
 
     // --- Control Interface ---
     input  logic                                                start_i,
-    output logic                                                busy_o,
+    //output logic                                                busy_o,
     output logic                                                done_o,
 
     // --- Interface to row_ptr_buffer ---
@@ -52,11 +52,8 @@ module scheduler #(
     typedef enum logic [3:0] {
         IDLE,
         FETCH_ROW_PTR,
-        WAIT_ROW_PTR,
-        WAIT_MEM,
         PROCESS_NNZ,
         WAIT_DP_OUT,
-        STORE_C,
         CHECK_DONE
     } state_e;
 
@@ -68,7 +65,6 @@ module scheduler #(
     logic [7:0]                  nnz_total_q, nnz_total_d;
     logic [7:0]                  global_nnz_ptr_q, global_nnz_ptr_d;
     logic [$clog2(NUM_ROWS)-1:0] b_row_addr_q, b_row_addr_d;
-    logic [$clog2(TOTAL_NNZ)-1:0] a_addr_reg_q, a_addr_reg_d;
 
     logic dp_in_hs;
     logic dp_out_hs;
@@ -87,7 +83,6 @@ module scheduler #(
             nnz_total_q      <= '0;
             global_nnz_ptr_q <= '0;
             b_row_addr_q     <= '0;
-            a_addr_reg_q     <= '0;
         end else if (clear_i) begin
             current_state    <= IDLE;
             row_idx_q        <= '0;
@@ -95,7 +90,6 @@ module scheduler #(
             nnz_total_q      <= '0;
             global_nnz_ptr_q <= '0;
             b_row_addr_q     <= '0;
-            a_addr_reg_q     <= '0;
         end else begin
             current_state    <= next_state;
             row_idx_q        <= row_idx_d;
@@ -103,7 +97,6 @@ module scheduler #(
             nnz_total_q      <= nnz_total_d;
             global_nnz_ptr_q <= global_nnz_ptr_d;
             b_row_addr_q     <= b_row_addr_d;
-            a_addr_reg_q     <= a_addr_reg_d;
         end
     end
 
@@ -118,7 +111,6 @@ module scheduler #(
         global_nnz_ptr_d    = global_nnz_ptr_q;
         b_row_addr_d        = b_row_addr_q;
 
-        busy_o              = 1'b1;
         done_o              = 1'b0;
 
         row_ptr_read_addr_o = row_idx_q;
@@ -137,7 +129,6 @@ module scheduler #(
         case (current_state)
 
             IDLE: begin
-                busy_o = 1'b0;
                 if (start_i) begin
                     row_idx_d        = '0;
                     global_nnz_ptr_d = '0;
@@ -145,28 +136,12 @@ module scheduler #(
                 end
             end
 
-            // 1. Richiede la lettura del puntatore per la riga corrente
-            FETCH_ROW_PTR: begin
+            // 2. campionare correttamente start ed end dalla memoria
+           FETCH_ROW_PTR: begin
                 row_ptr_read_addr_o = row_idx_q;
-                next_state          = WAIT_ROW_PTR;
-            end
-
-            // 2. Attende un ciclo per campionare correttamente start ed end dalla memoria
-           WAIT_ROW_PTR: begin
                 nnz_total_d         = row_ptr_end_i - row_ptr_start_i;
                 global_nnz_ptr_d    = row_ptr_start_i;
                 nnz_count_d         = '0;
-                
-                if ((row_ptr_end_i - row_ptr_start_i) == 8'd0) begin
-                    next_state = PROCESS_NNZ; // Riga vuota
-                end else begin
-                    next_state = WAIT_MEM;    // Avvia l'attesa del primo accesso memoria
-                end
-            end
-
-            WAIT_MEM: begin
-                // Questo stato dura esattamente 1 ciclo per dare tempo 
-                // alla memoria sincrona di A e ColID di restituire il dato valido
                 next_state = PROCESS_NNZ;
             end
 
@@ -184,7 +159,7 @@ module scheduler #(
                             next_state = WAIT_DP_OUT;
                         end else begin
                             nnz_count_d = nnz_count_q + 1'b1;
-                            next_state  = WAIT_MEM; // Torna a WAIT_MEM per il prossimo NNZ della riga
+                            next_state = PROCESS_NNZ;
                         end
                     end
                 end
@@ -193,20 +168,15 @@ module scheduler #(
             WAIT_DP_OUT: begin
                 dp_out_ready_o = 1'b1;
                 if (dp_out_valid_i) begin
-                    next_state = STORE_C;
+                    c_write_en_o       = 1'b1;
+                    c_write_row_addr_o = row_idx_q;
+                    next_state         = CHECK_DONE;
                 end
-            end
-
-            STORE_C: begin
-                c_write_en_o       = 1'b1;
-                c_write_row_addr_o = row_idx_q;
-                next_state         = CHECK_DONE;
             end
 
             CHECK_DONE: begin
                 if (row_idx_q == NUM_ROWS - 1) begin
                     done_o     = 1'b1;
-                    busy_o     = 1'b0;
                     next_state = IDLE;
                 end else begin
                     row_idx_d  = row_idx_q + 1'b1;
