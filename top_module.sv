@@ -10,9 +10,9 @@ module top_module #(
     parameter int unsigned NUM_MACS        = 16,          // Parallel MAC units
     parameter int unsigned NUM_ROWS        = 16,          // Number of rows
     parameter int unsigned TOTAL_NNZ       = 64,          // Max total non-zero elements
-    parameter int unsigned TOTAL_PTRS      = 65,          // Total row pointers
-    parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
-    parameter int unsigned DATA_WIDTH_OUT  = 32,          // INT32 output precision
+    parameter int unsigned TOTAL_PTRS      = 17,          // Total row pointers
+    parameter int unsigned STREAM_WORD_BIT = 128,          // PULP Streamer word width
+    parameter int unsigned DATA_WIDTH_OUT  = 8,          // INT32 output precision
     parameter bit          USE_LATCHES     = 0           // 1: Clock Gating + Latches, 0: Flip-Flops
 )(
     input  logic                                                clk_i,
@@ -45,7 +45,7 @@ module top_module #(
     // -------------------------------------------------------------------------
     localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
     localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD;
-    localparam int unsigned WORDS_PER_C_ROW        = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT;
+    //localparam int unsigned WORDS_PER_C_ROW        = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT;
 
     // Streamer <-> Buffers Write Interconnect
     logic                                               a_write_en;
@@ -59,7 +59,7 @@ module top_module #(
 
     // Streamer <-> C Buffer Read Interconnect
     logic [$clog2(NUM_ROWS)-1:0]                        c_read_row_addr;
-    logic [$clog2(WORDS_PER_C_ROW)-1:0]                 c_read_word_addr;
+    logic [$clog2(NUM_MACS)-1:0]                 c_read_word_addr;
     logic [STREAM_WORD_BIT-1:0]                         c_rdata;
 
     // Streamer <-> Scheduler FSM Handshake

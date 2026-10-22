@@ -5,10 +5,10 @@
 // ============================================================================
 
 module c_buffer #(
-    parameter int unsigned DATA_WIDTH_OUT  = 32,          // INT32 output width from MAC array
-    parameter int unsigned NUM_MACS        = 4,           // Number of parallel output columns
-    parameter int unsigned NUM_C_ROWS      = 32,          // Maximum number of storable C rows
-    parameter int unsigned STREAM_WORD_BIT = 32,          // PULP Streamer word width
+    parameter int unsigned DATA_WIDTH_OUT  = 8,          // INT32 output width from MAC array
+    parameter int unsigned NUM_MACS        = 16,           // Number of parallel output columns
+    parameter int unsigned NUM_C_ROWS      = 16,          // Maximum number of storable C rows
+    parameter int unsigned STREAM_WORD_BIT = 128,          // PULP Streamer word width
     parameter bit          USE_LATCHES     = 0           // 1: Use Clock Gating + Latches, 0: Flip-Flop
 )(
     input  logic                                                clk_i,

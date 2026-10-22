@@ -20,7 +20,7 @@ module a_buffer #(
 );
 
     localparam int unsigned ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;               // E.g., 32 / 8 = 4 elements per word 
-    localparam int unsigned NUM_WORDS      = TOTAL_NNZ / ELEMS_PER_WORD;                 // Total number of blocks/words 
+    localparam int unsigned NUM_WORDS      = (TOTAL_NNZ + ELEMS_PER_WORD - 1) / ELEMS_PER_WORD;                 // Total number of blocks/words 
 
     // Linear/block-structured SCM memory matrix for NNZ values 
     logic [NUM_WORDS-1:0][ELEMS_PER_WORD-1:0][DATA_WIDTH-1:0] mem_q;

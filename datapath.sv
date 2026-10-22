@@ -5,9 +5,9 @@
 
 module datapath #(
     parameter int unsigned DATA_WIDTH     = 8,
-    parameter int unsigned NUM_MACS       = 4,
-    parameter int unsigned NUM_ROWS       = 4,
-    parameter int unsigned DATA_WIDTH_OUT = 32
+    parameter int unsigned NUM_MACS       = 16,
+    parameter int unsigned NUM_ROWS       = 16,
+    parameter int unsigned DATA_WIDTH_OUT = 8
 )(
     input  logic                                clk_i,
     input  logic                                rst_ni,

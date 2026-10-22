@@ -1,8 +1,8 @@
 // ============================================================================
 // Module: streamer
-// Description: HWPE/HCI Compliant Streamer for CSR SpMM Accelerator.
+// Description: HWPE/HCI Compliant Streamer for CSR SpMM Accelerator (128-bit).
 //              Generates TCDM read requests for A_nnz, ColID, RowPtr, B
-//              and writes back matrix C results to TCDM memory.
+//              and writes back matrix C results (8-bit width) to TCDM memory.
 // ============================================================================
 
 import hci_package::*;
@@ -14,8 +14,8 @@ module streamer #(
     parameter int unsigned NUM_ROWS        = 16,
     parameter int unsigned TOTAL_NNZ       = 64,
     parameter int unsigned TOTAL_PTRS      = 65,
-    parameter int unsigned STREAM_WORD_BIT = 32,  // 32-bit TCDM / HWPE Stream
-    parameter int unsigned DATA_WIDTH_OUT  = 32
+    parameter int unsigned STREAM_WORD_BIT = 128, // Ampliato a 128-bit
+    parameter int unsigned DATA_WIDTH_OUT  = 8    // Ridotto a 8-bit
 )(
     input  logic clk_i,
     input  logic rst_ni,
@@ -65,7 +65,8 @@ module streamer #(
     input  logic accel_done_i
 );
 
-    localparam int unsigned WORDS_PER_C_ROW = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT; // 16 * 32 / 32 = 16
+    // Con NUM_MACS=16, DATA_WIDTH_OUT=8 e STREAM_WORD_BIT=128, WORDS_PER_C_ROW è esattamente 1
+    localparam int unsigned WORDS_PER_C_ROW = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT; // 16 * 8 / 128 = 1
 
     typedef enum logic [3:0] {
         ST_IDLE,
@@ -74,28 +75,26 @@ module streamer #(
         ST_LD_A,
         ST_LD_COL_ID,
         ST_RUN_ACCEL,
-        ST_ST_C_READ,
         ST_ST_C_WRITE,
         ST_DONE
     } streamer_state_e;
 
     streamer_state_e state_q, state_d;
 
-    // Contatori separati per richieste inviate e risposte ricevute
+    // Contatori per richieste e risposte
     logic [15:0] req_cnt_q, req_cnt_d;
     logic [15:0] resp_cnt_q, resp_cnt_d;
     logic [31:0] current_addr_q, current_addr_d;
 
-    // Matrix C Store Counters
-    logic [$clog2(NUM_ROWS)-1:0]          c_row_cnt_q, c_row_cnt_d;
-    logic [$clog2(WORDS_PER_C_ROW)-1:0]   c_word_cnt_q, c_word_cnt_d;
+    // Matrix C Store Counter (basta contare le righe poiché ogni riga è 1 sola parola da 128-bit)
+    logic [$clog2(NUM_ROWS)-1:0] c_row_cnt_q, c_row_cnt_d;
 
-    // TCDM Control Assignments
-    assign tcdm_master.be      = 4'b1111; // Full 32-bit word accesses
+    // TCDM Control Assignments (Byte enable esteso a 16 byte per il bus a 128-bit)
+    assign tcdm_master.be      = 16'hFFFF; 
     assign tcdm_master.user    = '0;
     assign tcdm_master.id      = '0;
     assign tcdm_master.r_ready = 1'b1;
-    assign tcdm_master.ereq    = 1'b0;
+    assign tcdm_master.ereq    = '0;
     assign tcdm_master.r_eready= 1'b1;
 
     // FSM State Register
@@ -106,21 +105,18 @@ module streamer #(
             resp_cnt_q     <= '0;
             current_addr_q <= '0;
             c_row_cnt_q    <= '0;
-            c_word_cnt_q   <= '0;
         end else if (clear_i) begin
             state_q        <= ST_IDLE;
             req_cnt_q      <= '0;
             resp_cnt_q     <= '0;
             current_addr_q <= '0;
             c_row_cnt_q    <= '0;
-            c_word_cnt_q   <= '0;
         end else begin
             state_q        <= state_d;
             req_cnt_q      <= req_cnt_d;
             resp_cnt_q     <= resp_cnt_d;
             current_addr_q <= current_addr_d;
             c_row_cnt_q    <= c_row_cnt_d;
-            c_word_cnt_q   <= c_word_cnt_d;
         end
     end
 
@@ -131,7 +127,6 @@ module streamer #(
         resp_cnt_d      = resp_cnt_q;
         current_addr_d  = current_addr_q;
         c_row_cnt_d     = c_row_cnt_q;
-        c_word_cnt_d    = c_word_cnt_q;
 
         busy_o          = 1'b1;
         done_o          = 1'b0;
@@ -154,7 +149,7 @@ module streamer #(
         row_ptr_wdata_o    = tcdm_master.r_data;
 
         c_read_row_addr_o  = c_row_cnt_q;
-        c_read_word_addr_o = c_word_cnt_q;
+        c_read_word_addr_o = '0; // Con 1 parola per riga l'indice è sempre 0
 
         case (state_q)
 
@@ -175,7 +170,7 @@ module streamer #(
                     tcdm_master.wen = 1'b1;
                     if (tcdm_master.gnt) begin
                         req_cnt_d      = req_cnt_q + 1'b1;
-                        current_addr_d = current_addr_q + 32'd4;
+                        current_addr_d = current_addr_q + 32'd16; // Incremento di 16 byte (128-bit)
                     end
                 end
 
@@ -199,7 +194,7 @@ module streamer #(
                     tcdm_master.wen = 1'b1;
                     if (tcdm_master.gnt) begin
                         req_cnt_d      = req_cnt_q + 1'b1;
-                        current_addr_d = current_addr_q + 32'd4;
+                        current_addr_d = current_addr_q + 32'd16;
                     end
                 end
 
@@ -223,7 +218,7 @@ module streamer #(
                     tcdm_master.wen = 1'b1;
                     if (tcdm_master.gnt) begin
                         req_cnt_d      = req_cnt_q + 1'b1;
-                        current_addr_d = current_addr_q + 32'd4;
+                        current_addr_d = current_addr_q + 32'd16;
                     end
                 end
 
@@ -247,7 +242,7 @@ module streamer #(
                     tcdm_master.wen = 1'b1;
                     if (tcdm_master.gnt) begin
                         req_cnt_d      = req_cnt_q + 1'b1;
-                        current_addr_d = current_addr_q + 32'd4;
+                        current_addr_d = current_addr_q + 32'd16;
                     end
                 end
 
@@ -267,47 +262,28 @@ module streamer #(
             ST_RUN_ACCEL: begin
                 accel_start_o  = 1'b1;
                 c_row_cnt_d    = '0;
-                c_word_cnt_d   = '0;
                 current_addr_d = c_base_addr_i;
                 if (accel_done_i) begin
-                    // Imposta i puntatori sul primo elemento del C-buffer prima di passare alla lettura
                     c_row_cnt_d    = '0;
-                    c_word_cnt_d   = '0;
-                    state_d        = ST_ST_C_READ;
+                    state_d        = ST_ST_C_WRITE;
                 end
             end
 
-            // --- 6. STREAM OUT: STORE C MATRIX TO TCDM ---
-            ST_ST_C_READ: begin
-                // Mantieni l'indirizzo impostato e attendi un ciclo di clock per stabilizzare c_rdata_i
-                c_read_row_addr_o  = c_row_cnt_q;
-                c_read_word_addr_o = c_word_cnt_q;
-                state_d = ST_ST_C_WRITE;
-            end
-
+            // --- 6. STREAM OUT: STORE C MATRIX TO TCDM (1 ciclo per riga) ---
             ST_ST_C_WRITE: begin
                 tcdm_master.req  = 1'b1;
-                tcdm_master.wen  = 1'b0; // Scrittura in TCDM
-                tcdm_master.data = c_rdata_i; // Dato prelevato dal C-buffer
+                tcdm_master.wen  = 1'b0;         // Scrittura in TCDM
+                tcdm_master.data = c_rdata_i;    // Intera riga a 128-bit prelevata dal C-buffer
 
-                // Mantieni gli indirizzi di lettura stabili durante la richiesta TCDM in stallo
-                c_read_row_addr_o  = c_row_cnt_q;
-                c_read_word_addr_o = c_word_cnt_q;
+                c_read_row_addr_o = c_row_cnt_q;
 
                 if (tcdm_master.gnt) begin
-                    current_addr_d = current_addr_q + 32'd4;
+                    current_addr_d = current_addr_q + 32'd16; // Incremento di 16 byte per la riga successiva
                     
-                    if (c_word_cnt_q == WORDS_PER_C_ROW - 1) begin
-                        c_word_cnt_d = '0;
-                        if (c_row_cnt_q == NUM_ROWS - 1) begin
-                            state_d = ST_DONE;
-                        end else begin
-                            c_row_cnt_d = c_row_cnt_q + 1'b1;
-                            state_d     = ST_ST_C_READ;
-                        end
+                    if (c_row_cnt_q == NUM_ROWS - 1) begin
+                        state_d = ST_DONE;
                     end else begin
-                        c_word_cnt_d = c_word_cnt_q + 1'b1;
-                        state_d      = ST_ST_C_READ;
+                        c_row_cnt_d = c_row_cnt_q + 1'b1;
                     end
                 end
             end

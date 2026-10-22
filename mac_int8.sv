@@ -6,17 +6,17 @@ module mac_int8 (
     input  logic               en,      
     input  logic unsigned [7:0]  a,       
     input  logic unsigned [7:0]  b,       
-    output logic unsigned [31:0] acc      
+    output logic unsigned [7:0] acc      
 );
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            acc <= 32'd0;
+            acc <= 8'd0;
         end else if (clr) begin
             // If clear is asserted but input data is already valid for the next row,
             // start the new accumulation directly instead of wasting a clock cycle.
             if (en) acc <= (a * b);
-            else    acc <= 32'd0;
+            else    acc <= 8'd0;
         end else if (en) begin
             acc <= acc + (a * b);
         end
