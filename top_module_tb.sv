@@ -6,16 +6,14 @@ module top_module_tb;
     parameter int unsigned DATA_WIDTH      = 8;
     parameter int unsigned NUM_MACS        = 16;
     parameter int unsigned NUM_ROWS        = 16;
-    parameter int unsigned TOTAL_NNZ       = 28;
-    parameter int unsigned TOTAL_PTRS      = 17; // Allineato a 16 righe + 1
-    parameter int unsigned STREAM_WORD_BIT = 128; // Aggiornato a 128-bit
-    parameter int unsigned DATA_WIDTH_OUT  = 8;   // Aggiornato a 8-bit
+    parameter int unsigned TOTAL_NNZ       = 64;  // Capacità massima statica del buffer SCM
+    parameter int unsigned TOTAL_PTRS      = 17;  // 16 righe + 1
+    parameter int unsigned STREAM_WORD_BIT = 128; // 128-bit bus width
+    parameter int unsigned DATA_WIDTH_OUT  = 8;   // 8-bit output
     parameter bit          USE_LATCHES     = 0;
 
     localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH; // 128 / 8 = 16
-    localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD; // 17 / 16 = 2
-    localparam int unsigned B_NUM_WORDS_PER_ROW    = (NUM_MACS * DATA_WIDTH) / STREAM_WORD_BIT; // 1 (16 * 8 / 128)
-    localparam int unsigned WORDS_PER_C_ROW        = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT; // 1 (16 * 8 / 128)
+    localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD; // 2 parole
 
     // --- Testbench Signals ---
     logic clk_i;
@@ -33,18 +31,16 @@ module top_module_tb;
     logic [31:0] b_base_addr_i;
     logic [31:0] c_base_addr_i;
 
-    logic [15:0] a_num_words_i;
-    logic [15:0] col_id_num_words_i;
     logic [15:0] row_ptr_num_words_i;
     logic [15:0] b_num_words_i;
-
+   
     // --- TCDM Interface Instantiation (DW = 128-bit) ---
     hci_core_intf #(.DW(128), .AW(32)) tcdm_if (.clk(clk_i));
 
     // --- Clock Generation (100 MHz) ---
     always #5 clk_i = ~clk_i;
 
-    // --- Top Module Instantiation (Integrated with Streamer) ---
+    // --- Top Module Instantiation ---
     top_module #(
         .DATA_WIDTH      (DATA_WIDTH),
         .NUM_MACS        (NUM_MACS),
@@ -69,9 +65,7 @@ module top_module_tb;
         .c_base_addr_i       (c_base_addr_i),
 
         .row_ptr_num_words_i (row_ptr_num_words_i),
-        .b_num_words_i       (b_num_words_i),
-        .a_num_words_i       (a_num_words_i),
-        .col_id_num_words_i  (col_id_num_words_i)
+        .b_num_words_i       (b_num_words_i)
     );
 
     // --- Behavioral TCDM Memory Model (128-bit wide) ---
@@ -95,7 +89,6 @@ module top_module_tb;
 
             if (tcdm_if.req) begin
                 if (tcdm_if.wen) begin
-                    // Indirizzamento basato su parole da 16 byte (shift a destra di 4)
                     tcdm_if.r_data  <= tcdm_memory[tcdm_if.add[31:4]];
                     tcdm_if.r_valid <= 1'b1;
                 end else begin
@@ -105,11 +98,15 @@ module top_module_tb;
         end
     end
 
-    // --- Task di Pre-caricamento della Memoria TCDM (128-bit pacchetti) ---
-    task populate_tcdm_memory();
+    // =========================================================================
+    // TASK 1: Popolamento TCDM per la PRIMA RUN (es. 26 NNZ totali)
+    // =========================================================================
+    task populate_tcdm_memory_run1();
         int addr_offset;
         begin
-            $display("[TB] Pre-loading TCDM Memory with 128-bit Input Data...");
+            $display("--------------------------------------------------");
+            $display("[TB] Pre-loading TCDM Memory for RUN 1...");
+            $display("--------------------------------------------------");
 
             row_ptr_base_addr_i = 32'h0000_1000;
             b_base_addr_i       = 32'h0000_2000;
@@ -118,11 +115,9 @@ module top_module_tb;
             c_base_addr_i       = 32'h0000_5000;
 
             row_ptr_num_words_i = ROW_PTR_NUM_WORDS; // 2 parole
-            b_num_words_i       = NUM_ROWS;          // 1 parola per riga * 16 righe = 16 parole
-            a_num_words_i       = 2;                 // 64 elementi NNZ / 16 per parola = 4 parole
-            col_id_num_words_i  = 2;                 // 64 ID / 16 per parola = 4 parole
+            b_num_words_i       = NUM_ROWS;          // 16 parole (1 per riga)
 
-            // 1. Caricamento Row Pointers (17 puntatori in 2 parole da 128-bit)
+            // 1. Caricamento Row Pointers (L'ultimo elemento indica 26 NNZ)
             addr_offset = row_ptr_base_addr_i >> 4;
             tcdm_memory[addr_offset + 0] = {
                 8'd26, 8'd24, 8'd23, 8'd20, 
@@ -130,9 +125,9 @@ module top_module_tb;
                 8'd12, 8'd11, 8'd10, 8'd6, 
                 8'd3,  8'd2,  8'd2,  8'd0
             };
-            tcdm_memory[addr_offset + 1] = {112'd0, 8'd28}; // Ultimo puntatore
+            tcdm_memory[addr_offset + 1] = {112'd0, 8'd26}; // Ultimo puntatore = 26 NNZ
 
-            // 2. Caricamento Matrice B (16 righe, 1 parola da 128-bit ciascuna = 16 elementi INT8)
+            // 2. Caricamento Matrice B
             addr_offset = b_base_addr_i >> 4;
             for (int r = 0; r < NUM_ROWS; r++) begin
                 tcdm_memory[addr_offset + r] = {
@@ -143,9 +138,9 @@ module top_module_tb;
                 };
             end
 
-            // --- STAMPA DELLA MATRICE B IN FORMATO DECIMALE ---
+             // --- STAMPA DELLA MATRICE B IN FORMATO DECIMALE ---
             $display("==================================================");
-            $display("    GENERATED RANDOM MATRIX B (16x16, INT8)       ");
+            $display("    GENERATED RANDOM MATRIX B1 (16x16, INT8)       ");
             $display("==================================================");
             for (int r = 0; r < NUM_ROWS; r++) begin
                 logic [127:0] b_row_val;
@@ -160,7 +155,7 @@ module top_module_tb;
             end
             $display("==================================================\n");
 
-            // 3. Caricamento Non-Zero Values A (64 elementi in 4 parole da 128-bit)
+            // 3. Caricamento Non-Zero Values A (26 elementi)
             addr_offset = a_base_addr_i >> 4;
             tcdm_memory[addr_offset + 0] = {
                 8'd6, 8'd4, 8'd3, 8'd2, 
@@ -169,13 +164,13 @@ module top_module_tb;
                 8'd1,  8'd2,  8'd3,  8'd4
             };
             tcdm_memory[addr_offset + 1] = {
-                32'd0,
-                8'd2, 8'd8, 8'd1, 8'd5,
+                80'd0,
                 8'd7, 8'd9, 8'd3, 8'd2,
-                8'd1, 8'd6, 8'd7, 8'd1
+                8'd1, 8'd6, 8'd7, 8'd1,
+                8'd2, 8'd8
             };
 
-            // 4. Caricamento Col IDs (64 ID in 4 parole da 128-bit)
+            // 4. Caricamento Col IDs (26 ID)
             addr_offset = col_id_base_addr_i >> 4;
             tcdm_memory[addr_offset + 0] = {
                 8'd6, 8'd14, 8'd3, 8'd2, 
@@ -184,18 +179,106 @@ module top_module_tb;
                 8'd1,  8'd2,  8'd3,  8'd4
             };
             tcdm_memory[addr_offset + 1] = {
-                32'd0,
-                8'd2, 8'd8, 8'd10, 8'd5,
+                80'd0,
                 8'd7, 8'd9, 8'd3, 8'd2,
-                8'd15, 8'd6, 8'd7, 8'd11
+                8'd15, 8'd6, 8'd7, 8'd11,
+                8'd2, 8'd8
             };
 
-
-            $display("[TB] TCDM Memory 128-bit pre-loaded successfully.\n");
+            $display("[TB] RUN 1 Data Loaded Successfully.\n");
         end
     endtask
 
-    // --- Main Test Sequence ---
+    // =========================================================================
+    // TASK 2: Popolamento TCDM per la SECONDA RUN (es. 20 NNZ totali, struttura diversa)
+    // =========================================================================
+    task populate_tcdm_memory_run2();
+        int addr_offset;
+        begin
+            $display("--------------------------------------------------");
+            $display("[TB] Pre-loading TCDM Memory for RUN 2...");
+            $display("--------------------------------------------------");
+
+            row_ptr_base_addr_i = 32'h0000_1000;
+            b_base_addr_i       = 32'h0000_2000;
+            a_base_addr_i       = 32'h0000_3000;
+            col_id_base_addr_i  = 32'h0000_4000;
+            c_base_addr_i       = 32'h0000_6000; // Nuovo indirizzo di output per la Run 2
+
+            row_ptr_num_words_i = ROW_PTR_NUM_WORDS;
+            b_num_words_i       = NUM_ROWS;
+
+            // 1. Nuovi Row Pointers (L'ultimo elemento indica 20 NNZ totali)
+            addr_offset = row_ptr_base_addr_i >> 4;
+            tcdm_memory[addr_offset + 0] = {
+                8'd20, 8'd18, 8'd16, 8'd14, 
+                8'd12, 8'd11, 8'd10, 8'd9, 
+                8'd8,  8'd7,  8'd6,  8'd5, 
+                8'd4,  8'd3,  8'd2,  8'd0
+            };
+            tcdm_memory[addr_offset + 1] = {112'd0, 8'd20}; // Ultimo puntatore = 20 NNZ
+
+            // 2. Nuova Matrice B
+            addr_offset = b_base_addr_i >> 4;
+            for (int r = 0; r < NUM_ROWS; r++) begin
+                tcdm_memory[addr_offset + r] = {
+                    8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1),
+                    8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1),
+                    8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1),
+                    8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1), 8'($urandom() % 15 + 1)
+                };
+            end
+
+             // --- STAMPA DELLA MATRICE B IN FORMATO DECIMALE ---
+            $display("==================================================");
+            $display("    GENERATED RANDOM MATRIX B2 (16x16, INT8)       ");
+            $display("==================================================");
+            for (int r = 0; r < NUM_ROWS; r++) begin
+                logic [127:0] b_row_val;
+                b_row_val = tcdm_memory[addr_offset + r];
+                $write("Row %2d -> [", r);
+                // Stampa i 16 elementi decimali separati da virgola
+                for (int e = 15; e >= 0; e--) begin
+                    $write("%3d", b_row_val[e*8 +: 8]);
+                    if (e > 0) $write(", ");
+                end
+                $display("]");
+            end
+            $display("==================================================\n");
+
+            // 3. Nuovi Elementi non-nulli di A (20 elementi)
+            addr_offset = a_base_addr_i >> 4;
+            tcdm_memory[addr_offset + 0] = {
+                8'd9, 8'd8, 8'd7, 8'd6, 
+                8'd5, 8'd4, 8'd3, 8'd2, 
+                8'd1, 8'd9, 8'd8, 8'd7, 
+                8'd6, 8'd5, 8'd4, 8'd3
+            };
+            tcdm_memory[addr_offset + 1] = {
+                96'd0,
+                8'd4, 8'd3, 8'd2, 8'd1
+            };
+
+            // 4. Nuovi Column IDs (20 ID)
+            addr_offset = col_id_base_addr_i >> 4;
+            tcdm_memory[addr_offset + 0] = {
+                8'd15, 8'd14, 8'd13, 8'd12, 
+                8'd11, 8'd10, 8'd9,  8'd8, 
+                8'd7,  8'd6,  8'd5,  8'd4, 
+                8'd3,  8'd2,  8'd1,  8'd0
+            };
+            tcdm_memory[addr_offset + 1] = {
+                96'd0,
+                8'd3,  8'd2,  8'd1,  8'd0
+            };
+
+            $display("[TB] RUN 2 Data Loaded Successfully.\n");
+        end
+    endtask
+
+    // =========================================================================
+    // Sequenza Principale di Test
+    // =========================================================================
     initial begin
         clk_i   = 0;
         rst_ni  = 0;
@@ -207,8 +290,6 @@ module top_module_tb;
         row_ptr_base_addr_i = 0;
         b_base_addr_i       = 0;
         c_base_addr_i       = 0;
-        a_num_words_i       = 0;
-        col_id_num_words_i  = 0;
         row_ptr_num_words_i = 0;
         b_num_words_i       = 0;
 
@@ -216,24 +297,22 @@ module top_module_tb;
         rst_ni = 1;
         #10;
 
-        // 1. Popolamento TCDM
-        populate_tcdm_memory();
+        // ---------------------------------------------------------------------
+        // PRIMA ESECUZIONE (RUN 1)
+        // ---------------------------------------------------------------------
+        populate_tcdm_memory_run1();
 
-        // 2. Avvio Streamer
         #20;
         start_i = 1'b1;
         #10;
         start_i = 1'b0;
 
-        // 3. Attesa completamento
         wait(done_o == 1'b1);
         #20;
 
-        // 4. Stampa Risultati Matrice C (1 parola da 128-bit per riga contenente 16 elementi da 8-bit)
         $display("==================================================");
-        $display("   FINAL MATRIX C RESULTS (8-bit) FROM TCDM       ");
+        $display("   RUN 1: FINAL MATRIX C RESULTS FROM TCDM        ");
         $display("==================================================");
-        
         for (int r = 0; r < NUM_ROWS; r++) begin
             int c_base_offset;
             logic [127:0] c_row_val;
@@ -241,7 +320,44 @@ module top_module_tb;
             c_row_val     = tcdm_memory[c_base_offset + r];
             
             $write("Row %2d -> [", r);
-            // Stampa i 16 elementi INT8 separati
+            for (int e = 15; e >= 0; e--) begin
+                $write("%4d ", c_row_val[e*8 +: 8]);
+                if (e > 0) $write(", ");
+            end
+            $display("]");
+        end
+        $display("==================================================\n");
+
+        // ---------------------------------------------------------------------
+        // SECONDA ESECUZIONE (RUN 2 - Nuova Matrice con diverso numero di NNZ)
+        // ---------------------------------------------------------------------
+        #50;
+        $display("[TB] Resetting/Clearing SCM Buffers for Second Run...");
+        clear_i = 1'b1;
+        #20;
+        clear_i = 1'b0;
+        #20;
+
+        populate_tcdm_memory_run2();
+
+        #20;
+        start_i = 1'b1;
+        #10;
+        start_i = 1'b0;
+
+        wait(done_o == 1'b1);
+        #20;
+
+        $display("==================================================");
+        $display("   RUN 2: FINAL MATRIX C RESULTS FROM TCDM        ");
+        $display("==================================================");
+        for (int r = 0; r < NUM_ROWS; r++) begin
+            int c_base_offset;
+            logic [127:0] c_row_val;
+            c_base_offset = c_base_addr_i >> 4;
+            c_row_val     = tcdm_memory[c_base_offset + r];
+            
+            $write("Row %2d -> [", r);
             for (int e = 15; e >= 0; e--) begin
                 $write("%4d ", c_row_val[e*8 +: 8]);
                 if (e > 0) $write(", ");

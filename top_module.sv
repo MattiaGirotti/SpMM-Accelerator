@@ -35,9 +35,7 @@ module top_module #(
     input  logic [31:0]                                         c_base_addr_i,
 
     input  logic [15:0]                                         row_ptr_num_words_i,
-    input  logic [15:0]                                         b_num_words_i,
-    input  logic [15:0]                                         a_num_words_i,
-    input  logic [15:0]                                         col_id_num_words_i
+    input  logic [15:0]                                         b_num_words_i
 );
 
     // -------------------------------------------------------------------------
@@ -59,7 +57,7 @@ module top_module #(
 
     // Streamer <-> C Buffer Read Interconnect
     logic [$clog2(NUM_ROWS)-1:0]                        c_read_row_addr;
-    logic [$clog2(NUM_MACS)-1:0]                 c_read_word_addr;
+    logic [$clog2((NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT)-1:0]                 c_read_word_addr;
     logic [STREAM_WORD_BIT-1:0]                         c_rdata;
 
     // Streamer <-> Scheduler FSM Handshake
@@ -119,8 +117,6 @@ module top_module #(
         .row_ptr_base_addr_i  (row_ptr_base_addr_i),
         .b_base_addr_i        (b_base_addr_i),
         .c_base_addr_i        (c_base_addr_i),
-        .a_num_words_i        (a_num_words_i),
-        .col_id_num_words_i   (col_id_num_words_i),
         .row_ptr_num_words_i  (row_ptr_num_words_i),
         .b_num_words_i        (b_num_words_i),
         .tcdm_master          (tcdm_master),
