@@ -53,8 +53,8 @@ module scheduler #(
         IDLE,
         FETCH_ROW_PTR,
         PROCESS_NNZ,
-        WAIT_DP_OUT,
-        CHECK_DONE
+        WAIT_DP_OUT
+        //CHECK_DONE
     } state_e;
 
     state_e current_state, next_state;
@@ -170,17 +170,15 @@ module scheduler #(
                 if (dp_out_valid_i) begin
                     c_write_en_o       = 1'b1;
                     c_write_row_addr_o = row_idx_q;
-                    next_state         = CHECK_DONE;
-                end
-            end
-
-            CHECK_DONE: begin
-                if (row_idx_q == NUM_ROWS - 1) begin
-                    done_o     = 1'b1;
-                    next_state = IDLE;
-                end else begin
-                    row_idx_d  = row_idx_q + 1'b1;
-                    next_state = FETCH_ROW_PTR;
+                    
+                    // Controllo di fine matrice e incremento integrati al volo
+                    if (row_idx_q == NUM_ROWS - 1) begin
+                        done_o     = 1'b1;
+                        next_state = IDLE;
+                    end else begin
+                        row_idx_d  = row_idx_q + 1'b1;
+                        next_state = FETCH_ROW_PTR; // Salta direttamente al fetch della riga successiva
+                    end
                 end
             end
 
