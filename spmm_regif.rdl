@@ -1,0 +1,219 @@
+/*
+ * spmm_regif.rdl
+ * Description: Address map for the CSR SpMM Accelerator, expressed in SystemRDL,
+ *              aligned with the HWPE framework and RedMulE architectural patterns.
+ */
+
+addrmap spmm_regif {
+    name = "SpMM accelerator register interface";
+    desc = "Control register map for CSR SpMM accelerator, including mandatory control/status registers and job-dependent configuration registers.";
+    
+    // Mandatory COMMIT_TRIGGER register. Not to be updated inside HWPEs.
+    reg hwpe_commit_trigger {
+        field {
+            name = "reserved";
+            desc = "Reserved.";
+            hw = r;
+            sw = r;
+        } r0[31:2] = 0;
+        field {
+            name = "commit_trigger";
+            desc = "Write 0 to commit job & start execution, unlock controller; write `0x1` value to commit job & unlock controller without starting execution; write `0x2` value to trigger current job queue without committing a new job.";
+            hw = r;
+            sw = w;
+            swacc = true;
+        } commit_trigger[1:0] = 0;
+    };
+    
+    // Mandatory ACQUIRE register. Not to be updated inside HWPEs.
+    reg hwpe_acquire {
+        field {
+            name = "acquire";
+            desc = "On read starts a job offload, locks controller. Returns job ID.";
+            hw = w;
+            sw = r;
+            swacc = true;
+        } acquire[31:0] = 0;
+    };
+    
+    // Mandatory AUTOTRIGGER register. Not to be updated inside HWPEs.
+    reg hwpe_autotrigger {
+        field {
+            name = "reserved";
+            desc = "Reserved.";
+            hw = r;
+            sw = r;
+        } r0[31:1] = 0;
+        field {
+            name = "autotrigger_n";
+            desc = "If 0 (default) trigger automatically the next job when the current is finished. If 1, wait for an explicit trigger.";
+            hw = r;
+            sw = rw;
+        } autotrigger_n[0:0] = 0;
+    };
+    
+    // Mandatory STATUS register. Not to be updated inside HWPEs.
+    reg hwpe_status {
+        field {
+            name = "status";
+            desc = "Status of currently running job.";
+            hw = w;
+            sw = r;
+        } status0[31:0] = 0;
+    };
+    
+    // Mandatory RUNNING_JOB register. Not to be updated inside HWPEs.
+    reg hwpe_running_job {
+        field {
+            name = "reserved";
+            desc = "Reserved.";
+            hw = r;
+            sw = r;
+        } r0[31:8] = 0;
+        field {
+            name = "running_job";
+            desc = "Returns ID of currently running job if any job is running; otherwise, of the last job that has been run.";
+            hw = w;
+            sw = r;
+        } running_job[7:0] = 0;
+    };
+    
+    // Mandatory SOFT_CLEAR register. Not to be updated inside HWPEs.
+    reg hwpe_soft_clear {
+        field {
+            name = "reserved";
+            desc = "Reserved.";
+            hw = r;
+            sw = r;
+        } r0[31:2] = 0;
+        field {
+            name = "soft_clear";
+            desc = "Write `0x0` to clear full status including register file; write `0x1` to clear status except register file; write `0x2` to clear only register file.";
+            hw = r;
+            sw = w;
+            swacc = true;
+        } soft_clear[1:0] = 0;
+    };
+    
+    // Mandatory RESERVED register. Not to be updated inside HWPEs.
+    reg hwpe_reserved {
+        field {
+            name = "reserved";
+            desc = "Reserved.";
+            hw = r;
+            sw = r;
+        } reserved[31:0] = 0;
+    };
+
+    // Mandatory set of HWPE control registers (CONTROL regs).
+    regfile hwpe_ctrl_mandatory {
+        hwpe_commit_trigger commit_trigger @ 0x00;
+        hwpe_acquire        acquire        @ 0x04;
+        hwpe_autotrigger    autotrigger    @ 0x08;
+        hwpe_status         status         @ 0x0c;
+        hwpe_running_job    running_job    @ 0x10;
+        hwpe_soft_clear     soft_clear     @ 0x14;
+        hwpe_reserved       reserved1      @ 0x18;
+        hwpe_reserved       reserved2      @ 0x1c;
+    };
+
+    // --- SpMM Job-Dependent Registers ---
+    
+    reg row_ptr_addr_reg {
+        name = "ROW_PTR_ADDR";
+        field {
+            name = "row_ptr_base_addr";
+            desc = "Base address of the row pointer array in TCDM.";
+            hw = r;
+            sw = rw;
+        } row_ptr_base_addr[32] = 0;
+    };
+
+    reg b_addr_reg {
+        name = "B_ADDR";
+        field {
+            name = "b_base_addr";
+            desc = "Base address of the dense matrix B in TCDM.";
+            hw = r;
+            sw = rw;
+        } b_base_addr[32] = 0;
+    };
+
+    reg a_addr_reg {
+        name = "A_ADDR";
+        field {
+            name = "a_base_addr";
+            desc = "Base address of the non-zero values of matrix A in TCDM.";
+            hw = r;
+            sw = rw;
+        } a_base_addr[32] = 0;
+    };
+
+    reg col_id_addr_reg {
+        name = "COL_ID_ADDR";
+        field {
+            name = "col_id_base_addr";
+            desc = "Base address of the column IDs in TCDM.";
+            hw = r;
+            sw = rw;
+        } col_id_base_addr[32] = 0;
+    };
+
+    reg c_addr_reg {
+        name = "C_ADDR";
+        field {
+            name = "c_base_addr";
+            desc = "Base address of the output matrix C in TCDM.";
+            hw = r;
+            sw = rw;
+        } c_base_addr[32] = 0;
+    };
+
+    reg lengths_reg {
+        name = "LENGTHS";
+        field {
+            name = "b_num_words";
+            desc = "Number of 128-bit words for matrix B.";
+            hw = r;
+            sw = rw;
+        } b_num_words[31:16] = 0;
+        field {
+            name = "row_ptr_num_words";
+            desc = "Number of 128-bit words for row pointers.";
+            hw = r;
+            sw = rw;
+        } row_ptr_num_words[15:0] = 0;
+    };
+
+    reg mopcnt_reg {
+        name = "MOPCNT";
+        field {
+            name = "op_id_cnt";
+            desc = "Completed operations counter.";
+            hw = w;
+            sw = r;
+        } op_id_cnt[31:0] = 0;
+    };
+
+    // No job-independent registers needed
+    regfile hwpe_ctrl_job_indep {
+        hwpe_reserved reserved;
+    };
+
+    // Job-dependent set of HWPE registers mapped starting from offset 0x20
+    regfile hwpe_ctrl_job_dep {
+        row_ptr_addr_reg row_ptr_addr @ 0x00;
+        b_addr_reg       b_addr       @ 0x04;
+        a_addr_reg       a_addr       @ 0x08;
+        col_id_addr_reg  col_id_addr  @ 0x0c;
+        c_addr_reg       c_addr       @ 0x10;
+        lengths_reg      lengths      @ 0x14;
+        mopcnt_reg       mopcnt       @ 0x18;
+    };
+
+    // HWPE control address map definition
+    hwpe_ctrl_mandatory hwpe_ctrl      @ 0x00;
+    hwpe_ctrl_job_dep   hwpe_job_dep   @ 0x20;
+    hwpe_ctrl_job_indep hwpe_job_indep @ 0x40;
+
+};

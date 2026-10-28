@@ -1,9 +1,10 @@
 // ============================================================================
-// Module: top_module (Integrated with spmm_streamer)
-// Description: CSR SpMM Accelerator wrapped with TCDM Streamer interface.
+// Module: top_module (Aggiornato con spmm_target_decoder)
 // ============================================================================
 
 import hci_package::*;
+import hwpe_ctrl_package::*;
+import spmm_pkg::*;     
 
 module top_module #(
     parameter int unsigned DATA_WIDTH      = 8,           // INT8 data width
@@ -11,39 +12,52 @@ module top_module #(
     parameter int unsigned NUM_ROWS        = 16,          // Number of rows
     parameter int unsigned TOTAL_NNZ       = 64,          // Max total non-zero elements
     parameter int unsigned TOTAL_PTRS      = 17,          // Total row pointers
-    parameter int unsigned STREAM_WORD_BIT = 128,          // PULP Streamer word width
-    parameter int unsigned DATA_WIDTH_OUT  = 8,          // INT32 output precision
-    parameter bit          USE_LATCHES     = 0           // 1: Clock Gating + Latches, 0: Flip-Flops
+    parameter int unsigned STREAM_WORD_BIT = 128,         // PULP Streamer word width
+    parameter int unsigned DATA_WIDTH_OUT  = 8,           // Output precision
+    parameter bit          USE_LATCHES     = 0            // 1: Clock Gating + Latches, 0: Flip-Flops
 )(
     input  logic                                                clk_i,
     input  logic                                                rst_ni,
     input  logic                                                clear_i,
 
-    // --- Control & Status Interface ---
-    input  logic                                                start_i,
-    //output logic                                                busy_o,
-    output logic                                                done_o,
-
     // --- TCDM Master Interface (To Memory Subsystem) ---
     hci_core_intf.initiator                                     tcdm_master,
 
-    // --- Configuration Registers (Base Addresses & Lengths) ---
-    input  logic [31:0]                                         row_ptr_base_addr_i,
-    input  logic [31:0]                                         b_base_addr_i,
-    input  logic [31:0]                                         a_base_addr_i,
-    input  logic [31:0]                                         col_id_base_addr_i,
-    input  logic [31:0]                                         c_base_addr_i,
-
-    input  logic [15:0]                                         row_ptr_num_words_i,
-    input  logic [15:0]                                         b_num_words_i
+    // --- HWPE-Ctrl Target Port (Front-End Interface) ---
+    hwpe_ctrl_intf_periph.slave                                 target
 );
 
     // -------------------------------------------------------------------------
-    // Local Parameters & Internal Interconnect Signals
+    // Segnali interni per il decoder e la configurazione
     // -------------------------------------------------------------------------
-    localparam int unsigned ROW_PTR_ELEMS_PER_WORD = STREAM_WORD_BIT / DATA_WIDTH;
-    localparam int unsigned ROW_PTR_NUM_WORDS      = (TOTAL_PTRS + ROW_PTR_ELEMS_PER_WORD - 1) / ROW_PTR_ELEMS_PER_WORD;
-    //localparam int unsigned WORDS_PER_C_ROW        = (NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT;
+    spmm_config_t accel_config;
+    logic         accel_config_valid;
+    logic         target_clear;
+    logic         done_o;
+    logic         busy_o;
+    logic         accel_start;
+    logic         accel_done;
+
+    // Connessione del Soft Clear globale (derivato sia dal pin esterno che dal target soft-clear)
+    logic         global_clear;
+    assign global_clear = clear_i | target_clear;
+
+    // -------------------------------------------------------------------------
+    // 0. Instanziazione del Decoder e Register File HWPE
+    // -------------------------------------------------------------------------
+    spmm_target_decoder #(
+        .OpIdWidth ( 4 )
+    ) i_spmm_target_decoder (
+        .clk_i            ( clk_i              ),
+        .rst_ni           ( rst_ni             ),
+        .clear_i          ( clear_i            ),
+        .target_clear_o   ( target_clear       ),
+        .config_ready_i   ( ~busy_o            ),
+        .op_done_i        ( done_o             ),
+        .config_valid_o   ( accel_config_valid ),
+        .config_o         ( accel_config       ),
+        .target           ( target             )
+    );
 
     // Streamer <-> Buffers Write Interconnect
     logic                                               a_write_en;
@@ -59,10 +73,6 @@ module top_module #(
     logic [$clog2(NUM_ROWS)-1:0]                        c_read_row_addr;
     logic [$clog2((NUM_MACS * DATA_WIDTH_OUT) / STREAM_WORD_BIT)-1:0]                 c_read_word_addr;
     logic [STREAM_WORD_BIT-1:0]                         c_rdata;
-
-    // Streamer <-> Scheduler FSM Handshake
-    logic                                               accel_start;
-    logic                                               accel_done;
 
     // row_ptr_buffer <-> scheduler
     logic [$clog2(TOTAL_PTRS-1)-1:0]                    row_ptr_read_addr;
@@ -95,7 +105,7 @@ module top_module #(
     logic                                               dp_matrix_end;
 
     // -------------------------------------------------------------------------
-    // 1. Instantiation of SpMM Streamer
+    // 1. Instantiation of SpMM Streamer (Configurato tramite `accel_config`)
     // -------------------------------------------------------------------------
     streamer #(
         .DATA_WIDTH      (DATA_WIDTH),
@@ -108,17 +118,17 @@ module top_module #(
     ) i_spmm_streamer (
         .clk_i                (clk_i),
         .rst_ni               (rst_ni),
-        .clear_i              (clear_i),
-        .start_i              (start_i),
+        .clear_i              (global_clear),
+        .start_i              (accel_config_valid),
         .busy_o               (busy_o),
         .done_o               (done_o),
-        .a_base_addr_i        (a_base_addr_i),
-        .col_id_base_addr_i   (col_id_base_addr_i),
-        .row_ptr_base_addr_i  (row_ptr_base_addr_i),
-        .b_base_addr_i        (b_base_addr_i),
-        .c_base_addr_i        (c_base_addr_i),
-        .row_ptr_num_words_i  (row_ptr_num_words_i),
-        .b_num_words_i        (b_num_words_i),
+        .a_base_addr_i        (accel_config.a_base_addr),
+        .col_id_base_addr_i   (accel_config.col_id_base_addr),
+        .row_ptr_base_addr_i  (accel_config.row_ptr_base_addr),
+        .b_base_addr_i        (accel_config.b_base_addr),
+        .c_base_addr_i        (accel_config.c_base_addr),
+        .row_ptr_num_words_i  (accel_config.row_ptr_num_words),
+        .b_num_words_i        (accel_config.b_num_words),
         .tcdm_master          (tcdm_master),
         .a_write_en_o         (a_write_en),
         .a_wdata_o            (a_wdata),
@@ -136,7 +146,7 @@ module top_module #(
     );
 
     // -------------------------------------------------------------------------
-    // 2. Instantiation of SCM Input Buffers (con indirizzamento interno)
+    // 2. Instantiation of SCM Input Buffers
     // -------------------------------------------------------------------------
     a_buffer #(
         .DATA_WIDTH      (DATA_WIDTH),
@@ -146,7 +156,7 @@ module top_module #(
     ) i_a_buffer (
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
-        .clear_i           (clear_i),
+        .clear_i           (global_clear),
         .write_en_i        (a_write_en),
         .wdata_i           (a_wdata),
         .read_addr_i       (a_read_addr),
@@ -162,7 +172,7 @@ module top_module #(
     ) i_b_buffer (
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
-        .clear_i           (clear_i),
+        .clear_i           (global_clear),
         .write_en_i        (b_write_en),
         .wdata_i           (b_wdata),
         .read_row_addr_i   (b_read_row_addr),
@@ -177,7 +187,7 @@ module top_module #(
     ) i_colID_buffer (
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
-        .clear_i           (clear_i),
+        .clear_i           (global_clear),
         .write_en_i        (col_id_write_en),
         .wdata_i           (col_id_wdata),
         .read_addr_i       (col_id_read_addr),
@@ -192,7 +202,7 @@ module top_module #(
     ) i_row_ptr_buffer (
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
-        .clear_i           (clear_i),
+        .clear_i           (global_clear),
         .write_en_i        (row_ptr_write_en),
         .wdata_i           (row_ptr_wdata),
         .read_row_idx_i    (row_ptr_read_addr),
@@ -212,7 +222,7 @@ module top_module #(
     ) i_c_buffer (
         .clk_i             (clk_i),
         .rst_ni            (rst_ni),
-        .clear_i           (clear_i),
+        .clear_i           (global_clear),
         .write_en_i        (c_buf_write_en),
         .write_row_addr_i  (c_buf_write_row_addr),
         .wdata_i           (dp_data_out),
@@ -234,9 +244,9 @@ module top_module #(
     ) i_scheduler (
         .clk_i                 (clk_i),
         .rst_ni                (rst_ni),
-        .clear_i               (clear_i),
-        .start_i               (accel_start), // Guidato dallo streamer anziché dal pin esterno
-        .done_o                (accel_done),  // Collegato allo streamer per notificare la fine
+        .clear_i               (global_clear),
+        .start_i               (accel_start),
+        .done_o                (accel_done),
         .row_ptr_read_addr_o   (row_ptr_read_addr),
         .row_ptr_start_i       (row_ptr_start),
         .row_ptr_end_i         (row_ptr_end),
@@ -265,7 +275,7 @@ module top_module #(
     ) i_datapath (
         .clk_i            (clk_i),
         .rst_ni           (rst_ni),
-        .clear_i          (clear_i),
+        .clear_i          (global_clear),
         .nnz_iterations_i (dp_nnz_iterations),
         .matrix_end_o     (dp_matrix_end),
         .in_valid_i       (dp_in_valid),

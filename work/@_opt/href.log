@@ -1,0 +1,31 @@
+BEGIN 1:hwpe_ctrl_target:fast:work
+    hwif_in :  1:hwpe_ctrl_target:fast:work
+    hwif_out :  1:hwpe_ctrl_target:fast:work
+END 
+BEGIN 3:hci_core_intf:fast__1:work
+    r_eready :  1:streamer:fast:work
+    gnt :  1:top_module_tb:fast:work 1:streamer:fast:work
+    user :  1:streamer:fast:work
+    data :  1:top_module_tb:fast:work 1:streamer:fast:work
+    ereq :  1:streamer:fast:work
+    wen :  1:top_module_tb:fast:work 1:streamer:fast:work
+    add :  1:top_module_tb:fast:work 1:streamer:fast:work
+    be :  1:streamer:fast:work
+    r_ready :  1:streamer:fast:work
+    req :  1:top_module_tb:fast:work 1:streamer:fast:work
+    r_data :  1:top_module_tb:fast:work 1:streamer:fast:work
+    id :  1:streamer:fast:work
+    r_valid :  1:top_module_tb:fast:work 1:streamer:fast:work
+END 
+BEGIN 3:hwpe_ctrl_intf_periph:fast__1:work
+    req :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    add :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    r_id :  1:hwpe_ctrl_target:fast:work
+    be :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    r_valid :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    id :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    wen :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    data :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    gnt :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+    r_data :  1:top_module_tb:fast:work 1:hwpe_ctrl_target:fast:work
+END 

@@ -1,0 +1,81 @@
+# vsim -c -voptargs="+acc" top_module_tb -do "run -all; quit" 
+# Start time: 11:23:14 on Oct 28,2026
+# ** Note: (vsim-3812) Design is being optimized...
+# ** Warning: (vopt-10587) Some optimizations are turned off because the +acc switch is in effect. This will cause your simulation to run slowly. Please use -access/-debug to maintain needed visibility. The +acc switch would be deprecated in a future release.
+# ** Warning: regif/spmm_regif.sv(24): (vopt-13314) Defaulting port 'hwif_in' kind to 'var' rather than 'wire' due to default compile option setting of -svinputport=relaxed.
+# ** Note: (vopt-143) Recognized 1 FSM in module "streamer(fast)".
+# ** Note: (vopt-143) Recognized 1 FSM in module "scheduler(fast)".
+# ** Warning: c_buffer.sv(21): (vopt-13314) Defaulting port 'wdata_i' kind to 'var' rather than 'wire' due to default compile option setting of -svinputport=relaxed.
+# ** Note: (vsim-12126) Error and warning message counts have been restored: Errors=0, Warnings=3.
+# //  Questa Sim-64
+# //  Version 2024.3 linux_x86_64 Sep 10 2024
+# //
+# // Unpublished work. Copyright 2024 Siemens
+# //
+# // This material contains trade secrets or otherwise confidential information
+# // owned by Siemens Industry Software Inc. or its affiliates (collectively,
+# // "SISW"), or its licensors. Access to and use of this information is strictly
+# // limited as set forth in the Customer's applicable agreements with SISW.
+# //
+# // This material may not be copied, distributed, or otherwise disclosed outside
+# // of the Customer's facilities without the express written permission of SISW,
+# // and may not be used in any way not expressly authorized by SISW.
+# //
+# Loading sv_std.std
+# Loading work.top_module_tb(fast)
+# Loading work.hwpe_stream_package(fast)
+# Loading work.hci_package(fast)
+# Loading work.hci_core_intf(fast__1)
+# Loading work.hwpe_ctrl_package(fast)
+# Loading work.hwpe_ctrl_intf_periph(fast__1)
+# Loading work.spmm_pkg(fast)
+# Loading work.top_module_sv_unit(fast)
+# Loading work.top_module(fast)
+# Loading work.spmm_regif_pkg(fast)
+# Loading work.spmm_target_decoder(fast)
+# Loading work.hwpe_ctrl_target(fast)
+# Loading work.cc_pkg(fast)
+# Loading work.fifo_v3(fast)
+# Loading work.cc_fifo(fast)
+# Loading work.spmm_regif(fast)
+# Loading work.streamer_sv_unit(fast)
+# Loading work.streamer(fast)
+# Loading work.a_buffer(fast)
+# Loading work.b_buffer(fast)
+# Loading work.colID_buffer(fast)
+# Loading work.row_ptr_buffer(fast)
+# Loading work.c_buffer(fast)
+# Loading work.scheduler(fast)
+# Loading work.datapath(fast)
+# Loading work.mac_int8(fast)
+# run -all
+# ** Warning: Module 'top_module_tb.u_top.i_spmm_target_decoder.i_target.i_job_fifo' is deprecated. Use 'cc_fifo' instead.
+#    Time: 0 ps  Scope: top_module_tb.u_top.i_spmm_target_decoder.i_target.i_job_fifo File: fifo_v3.sv Line: 28
+# [TB] Pre-loading TCDM Memory for RUN 1...
+# [TB] Configuring accelerator registers via control bus...
+# [TB] Triggering job execution...
+# ==================================================
+#    FINAL MATRIX C RESULTS FROM TCDM (Run 1)       
+# ==================================================
+# Row  0 -> [   7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ,    7 ]
+# Row  1 -> [   0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ]
+# Row  2 -> [   2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ]
+# Row  3 -> [  17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ,   17 ]
+# Row  4 -> [  27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ,   27 ]
+# Row  5 -> [   8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ]
+# Row  6 -> [   2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ,    2 ]
+# Row  7 -> [   9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ]
+# Row  8 -> [   6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ,    6 ]
+# Row  9 -> [  10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ,   10 ]
+# Row 10 -> [   0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ]
+# Row 11 -> [   8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ,    8 ]
+# Row 12 -> [   9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ,    9 ]
+# Row 13 -> [   3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ,    3 ]
+# Row 14 -> [  16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ,   16 ]
+# Row 15 -> [   0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ,    0 ]
+# ==================================================
+# 
+# ** Note: $finish    : top_module_tb.sv(254)
+#    Time: 5305 ns  Iteration: 0  Instance: /top_module_tb
+# End time: 11:23:15 on Oct 28,2026, Elapsed time: 0:00:01
+# Errors: 0, Warnings: 4
