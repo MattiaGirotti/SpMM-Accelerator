@@ -28,8 +28,7 @@ module top_module_tb;
     hwpe_ctrl_intf_periph target_if (.clk(clk_i));
 
     // Segnale di fine calcolo (collegato indirettamente o monitorato)
-    // Nota: possiamo monitorare lo status o attendere la fine tramite il bus
-    logic done_o; // Se desideri esporlo o verificarlo dai registri
+    logic done_o;
 
     // --- Clock Generation (100 MHz) ---
     always #5 clk_i = ~clk_i;
@@ -49,7 +48,7 @@ module top_module_tb;
         .rst_ni        (rst_ni),
         .clear_i       (clear_i),
         .tcdm_master   (tcdm_if),
-        .target        (target_if)   // <-- Connessione della porta di controllo
+        .target        (target_if)
     );
 
     // --- Behavioral TCDM Memory Model (128-bit wide) ---
@@ -95,7 +94,6 @@ module top_module_tb;
             target_if.be    = 4'hF; // Byte enable attivo su tutti i 32 bit
             target_if.id    = '0;
 
-            // Attende il grant dal decoder
             do begin
                 @(posedge clk_i);
             end while (!target_if.gnt);
@@ -107,7 +105,7 @@ module top_module_tb;
     endtask
 
     // =========================================================================
-    // TASK DI LETTURA DEI REGISTRI (Opzionale, utile per controllare lo status)
+    // TASK DI LETTURA DEI REGISTRI
     // =========================================================================
     task automatic read_register(input logic [31:0] addr, output logic [31:0] data);
         begin
@@ -124,7 +122,6 @@ module top_module_tb;
 
             target_if.req   = 1'b0;
             
-            // Attende la risposta valida r_valid
             do begin
                 @(posedge clk_i);
             end while (!target_if.r_valid);
@@ -134,7 +131,7 @@ module top_module_tb;
     endtask
 
     // =========================================================================
-    // TASK DI POPOLAMENTO MEMORIA (Invariato rispetto al precedente)
+    // TASK DI POPOLAMENTO MEMORIA
     // =========================================================================
     task populate_tcdm_memory_run1();
         int addr_offset;
@@ -213,7 +210,7 @@ module top_module_tb;
         populate_tcdm_memory_run1();
         #20;
 
-        // --- CONFIGURAZIONE TRAMITE I REGISTRI HWPE-CTRL (Offset da spmm_regif.rdl) ---
+        // --- CONFIGURAZIONE TRAMITE I REGISTRI HWPE-CTRL ---
         $display("[TB] Configuring accelerator registers via control bus...");
         
         write_register(32'h0000_0020, 32'h0000_1000); // row_ptr_base_addr (@ 0x20)
@@ -221,17 +218,27 @@ module top_module_tb;
         write_register(32'h0000_0028, 32'h0000_3000); // a_base_addr       (@ 0x28)
         write_register(32'h0000_002c, 32'h0000_4000); // col_id_base_addr  (@ 0x2C)
         write_register(32'h0000_0030, 32'h0000_5000); // c_base_addr       (@ 0x30)
-        write_register(32'h0000_0034, {16'd16, 16'd2}); // lengths: b_num_words=16, row_ptr_num_words=2 (@ 0x34)
+        write_register(32'h0000_0034, {16'd16, 16'd2}); // lengths (@ 0x34)
 
         // --- AVVIO DEL JOB (COMMIT & TRIGGER) ---
         $display("[TB] Triggering job execution...");
-        write_register(32'h0000_0000, 32'h0000_0000); // commit_trigger (@ 0x00) -> Scrive 0 per committare e partire
+        write_register(32'h0000_0000, 32'h0000_0000); // commit_trigger (@ 0x00)
 
-        // Attendiamo il completamento leggendo periodicamente lo status o monitorando i registri
-        // In alternativa, possiamo fare un polling sul registro status o inserire un tempo di attesa stimato,
-        // oppure leggere il registro running_job finché torna a 0.
-        #5000; 
+        // --- POLLING DEL REGISTRO STATUS (Offset 0x0C) ---
+        $display("[TB] Waiting for job completion by polling status register...");
+        begin
+            logic [31:0] status_val;
+            
+            // Attendiamo che lo status segnali il completamento 
+            // (Nei blocchi HWPE standard, lo status torna a 0 o assume un bit di fine job)
+            do begin
+                read_register(32'h0000_000c, status_val); // Legge hwpe_status (@ 0x0C)
+                #20;
+            end while (status_val != 32'h0000_0000); // Adatta la condizione in base a cosa ritorna il tuo status a fine esecuzione
+        end
+        $display("[TB] Job execution completed successfully!");
 
+        // Stampa dei risultati finali dalla TCDM
         $display("==================================================");
         $display("   FINAL MATRIX C RESULTS FROM TCDM (Run 1)       ");
         $display("==================================================");
